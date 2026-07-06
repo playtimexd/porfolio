@@ -695,6 +695,34 @@ button.danger:hover { background: rgba(229,72,77,.15); }
 .cmsg.user .cbubble { background: linear-gradient(135deg, var(--accent), #6448d6); color: #fff; border-bottom-right-radius: 4px; }
 .cmsg.agent .cbubble.thinking { color: var(--text-dim); }
 
+/* quick-start chips in the empty chat */
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: center;
+  padding: 10px 4px;
+}
+.starters-title {
+  width: 100%;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.starter {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color .15s, transform .1s;
+}
+.starter:hover { border-color: var(--accent); transform: translateY(-1px); background: var(--panel-2); }
+.starter.ghost { color: var(--text-dim); border-style: dashed; }
+
 /* deliverable card inside chat */
 .deliv {
   background: var(--bg);

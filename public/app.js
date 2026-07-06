@@ -1517,6 +1517,16 @@ function buildChatCfg() {
   cfg.appendChild(chatModelSelect('video', 'videoModel'));
 }
 
+// Lovart-style quick-start chips shown when the chat is empty
+const CHAT_STARTERS = [
+  ['🎬 Cinematic trailer', 'Write a cinematic trailer storyboard about … , then generate the shots as images'],
+  ['📱 Instagram post', 'Design a bold 1:1 Instagram post visual about … — write the prompt, then generate it'],
+  ['🖼 Logo design', 'Design a minimalist logo for … — propose 4 distinct directions, then generate them as images'],
+  ['📦 Product shots', 'Create 4 professional product photos of … with consistent studio lighting and background'],
+  ['🔁 Repurpose an idea', 'Repurpose this idea across platforms: … — write prompt variants for a 1:1 post, a 9:16 story and a 21:9 banner'],
+  ['🎞 One-shot video', 'Create one cinematic 5-second video shot of … — write the perfect prompt first, then generate the video'],
+];
+
 function renderChat() {
   if (!chatMsgs) return;
   chatMsgs.innerHTML = '';
@@ -1525,6 +1535,24 @@ function renderChat() {
     w.appendChild(el('div', { class: 'cbubble' },
       'Hi! I’m your creative agent. Tell me what you’d like to make — a script, a prompt pack, a storyboard, a cinematic video, an image series — and we’ll shape it together.'));
     chatMsgs.appendChild(w);
+    const box = el('div', { class: 'starters' });
+    box.appendChild(el('div', { class: 'starters-title' }, 'Try one of these'));
+    for (const [label, prompt] of CHAT_STARTERS) {
+      const chip = el('button', { class: 'starter', type: 'button' }, label);
+      chip.addEventListener('click', () => {
+        chatInput.value = prompt;
+        chatInput.focus();
+        // put the caret on the "…" placeholder so the user types their subject
+        const dots = chatInput.value.indexOf('…');
+        if (dots >= 0) chatInput.setSelectionRange(dots, dots + 1);
+        chatInput.dispatchEvent(new Event('input'));
+      });
+      box.appendChild(chip);
+    }
+    const allSkills = el('button', { class: 'starter ghost', type: 'button' }, '⚙ Manage skills');
+    allSkills.addEventListener('click', () => document.getElementById('btn-skills').click());
+    box.appendChild(allSkills);
+    chatMsgs.appendChild(box);
     return;
   }
   for (const m of chatHistory) {

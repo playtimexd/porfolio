@@ -19,6 +19,7 @@ const KEYS = {
   anthropic: process.env.ANTHROPIC_API_KEY || '',
   gemini: process.env.GEMINI_API_KEY || '',
   seedance: process.env.SEEDANCE_API_KEY || '',
+  meshy: process.env.MESHY_API_KEY || '',
 };
 const ARK_BASE = process.env.ARK_BASE_URL || 'https://ark.ap-southeast.bytepluses.com/api/v3';
 
@@ -44,6 +45,8 @@ const MODELS = [
   { id: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image', label: 'Gemini Image (Nano Banana)', provider: 'gemini', kind: 'image' },
   // Seedance via BytePlus ModelArk — set SEEDANCE_MODEL to the exact id from your console
   { id: process.env.SEEDANCE_MODEL || 'seedance-2-0', label: 'Seedance', provider: 'seedance', kind: 'video' },
+  // Meshy — text-to-3D / image-to-3D
+  { id: 'meshy-3d', label: 'Meshy 3D', provider: 'meshy', kind: 'threed' },
 ];
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -431,6 +434,52 @@ const providers = {
       throw apiError('Seedance generation timed out');
     },
   },
+
+  // ---------------- Meshy (text/image → 3D) ----------------
+  meshy: {
+    headers() {
+      return { 'Authorization': `Bearer ${KEYS.meshy}`, 'Content-Type': 'application/json' };
+    },
+    async poll(base, id) {
+      for (let i = 0; i < 240; i++) {
+        await sleep(5000);
+        const st = await jsonFetch(`${base}/${id}`, { headers: this.headers() });
+        if (st.status === 'SUCCEEDED') return st;
+        if (st.status === 'FAILED' || st.status === 'CANCELED') {
+          throw apiError(st.task_error?.message || `Meshy task ${st.status.toLowerCase()}`);
+        }
+      }
+      throw apiError('Meshy generation timed out');
+    },
+    async threed(model, { prompt, image, artStyle, quality }) {
+      let base, task;
+      if (image) {
+        base = 'https://api.meshy.ai/openapi/v1/image-to-3d';
+        task = await jsonFetch(base, {
+          method: 'POST', headers: this.headers(),
+          body: JSON.stringify({ image_url: image, should_texture: quality !== 'preview', enable_pbr: true }),
+        });
+      } else {
+        if (!prompt) throw apiError('Connect a prompt or an image to the 3D node', 400);
+        base = 'https://api.meshy.ai/openapi/v2/text-to-3d';
+        task = await jsonFetch(base, {
+          method: 'POST', headers: this.headers(),
+          body: JSON.stringify({ mode: 'preview', prompt, art_style: artStyle || 'realistic', should_remesh: true }),
+        });
+      }
+      let st = await this.poll(base, task.result);
+      // text-to-3D previews are untextured — run the refine pass when asked
+      if (!image && quality !== 'preview') {
+        const refine = await jsonFetch(base, {
+          method: 'POST', headers: this.headers(),
+          body: JSON.stringify({ mode: 'refine', preview_task_id: task.result, enable_pbr: true }),
+        });
+        st = await this.poll(base, refine.result);
+      }
+      if (!st.model_urls?.glb) throw apiError('Meshy returned no model');
+      return { model: st.model_urls.glb, thumbnail: st.thumbnail_url || null };
+    },
+  },
 };
 
 // =====================================================================
@@ -448,6 +497,8 @@ async function run(modelId, inputs) {
 
 // ---- HTTP server ----
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const jobs = new Map(); // jobId -> {status, result, error, at}
+let jobSeq = 1;
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -471,8 +522,20 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/api/run') {
       const { model, inputs } = await readBody(req);
       if (!model) return json(res, 400, { error: 'model required' });
-      const result = await run(model, inputs || {});
-      return json(res, 200, result);
+      // async job queue — long generations (video, 3D) outlive proxy timeouts
+      const jobId = 'j' + (jobSeq++).toString(36) + Date.now().toString(36);
+      const job = { status: 'running', result: null, error: null, at: Date.now() };
+      jobs.set(jobId, job);
+      run(model, inputs || {})
+        .then(r => { job.status = 'done'; job.result = r; })
+        .catch(e => { job.status = 'error'; job.error = e.message || 'Generation failed'; });
+      for (const [k, jv] of jobs) if (Date.now() - jv.at > 30 * 60e3) jobs.delete(k);
+      return json(res, 200, { jobId });
+    }
+    if (req.method === 'GET' && req.url.startsWith('/api/jobs/')) {
+      const job = jobs.get(req.url.slice('/api/jobs/'.length));
+      if (!job) return json(res, 404, { error: 'Job not found (the server may have restarted mid-generation — try again)' });
+      return json(res, 200, { status: job.status, result: job.result, error: job.error });
     }
     // ---- projects API (backed by the store: local disk or Supabase) ----
     if (req.method === 'GET' && req.url === '/api/projects') {

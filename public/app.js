@@ -14,7 +14,7 @@ const zoomLabel = document.getElementById('zoom-label');
 const propsBody = document.getElementById('props-body');
 const propsTitle = document.getElementById('props-title');
 
-const TYPE_COLORS = { text: '#b98aff', image: '#4cc9f0', video: '#ff9e64', any: '#97979f' };
+const TYPE_COLORS = { text: '#b98aff', image: '#4cc9f0', video: '#ff9e64', model: '#6ef0d2', any: '#97979f' };
 
 // aspect-ratio & quality options (Weavy-style ranges; mapped per provider server-side)
 const RATIO_OPTS = [
@@ -178,6 +178,44 @@ const NODE_TYPES = {
       addAsset('video', r.video, v(inputs.prompt));
       refreshMedia(node);
       return { video: { type: 'video', value: r.video } };
+    },
+  },
+
+  threeD: {
+    title: '3D Model', color: '#6ef0d2', desc: 'prompt/image → 3D',
+    inputs: [{ name: 'prompt', type: 'text', optional: true }, { name: 'image', type: 'image', optional: true }],
+    outputs: [{ name: 'model', type: 'model' }],
+    defaults: () => ({ model: '', artStyle: 'realistic', quality: 'preview' }),
+    sub: (n) => modelLabel(n.data.model),
+    media(node) {
+      if (node.out.media) return mediaEl(node.out.media);
+      return el('div', { class: 'placeholder' }, 'No 3D model yet — generation takes a few minutes. Connect a prompt (text-to-3D) or an image (image-to-3D).');
+    },
+    props(node, box) {
+      box.appendChild(el('label', {}, 'Model'));
+      box.appendChild(modelSelect(node, 'threed'));
+      const row = el('div', { class: 'row' });
+      const c1 = el('div');
+      c1.appendChild(el('label', {}, 'Art style'));
+      c1.appendChild(selectCtl(node, 'artStyle', [['realistic', 'Realistic'], ['sculpture', 'Sculpture']]));
+      const c2 = el('div');
+      c2.appendChild(el('label', {}, 'Quality'));
+      c2.appendChild(selectCtl(node, 'quality', [['preview', 'Preview (fast)'], ['textured', 'Textured (slower)']]));
+      row.appendChild(c1); row.appendChild(c2);
+      box.appendChild(row);
+      box.appendChild(el('div', { class: 'mini-hint' }, 'Textured runs Meshy’s refine pass — better result, more credits. Drag the preview to rotate it.'));
+      actionRow(node, box);
+    },
+    async exec(node, inputs) {
+      const prompt = v(inputs.prompt);
+      const image = v(inputs.image);
+      if (!prompt && !image) throw new Error('Connect a prompt or an image');
+      setState(node, 'running', 'Sculpting… this takes a few minutes');
+      const r = await api(node.data.model, { prompt, image, artStyle: node.data.artStyle, quality: node.data.quality });
+      node.out.media = { kind: 'model', src: r.model, poster: r.thumbnail };
+      addAsset('model', r.model, prompt || '3D from image', r.thumbnail);
+      refreshMedia(node);
+      return { model: { type: 'model', value: r.model } };
     },
   },
 
@@ -393,10 +431,24 @@ function mediaEl(media) {
   if (media.kind === 'video') {
     m = el('video', { src: media.src, controls: '', loop: '' });
     m.muted = true; m.autoplay = true;
+    m.addEventListener('loadedmetadata', () => { redrawEdges(); drawMinimap(); });
+  } else if (media.kind === 'model') {
+    if (window.customElements?.get('model-viewer')) {
+      m = el('model-viewer', {
+        src: media.src, 'camera-controls': '', 'auto-rotate': '', 'shadow-intensity': '1',
+        style: 'width:100%;height:190px;background:#141418;display:block',
+      });
+      if (media.poster) m.setAttribute('poster', media.poster);
+    } else if (media.poster) {
+      m = el('img', { src: media.poster, title: '3D preview (viewer unavailable offline) — download for the full model' });
+      m.addEventListener('load', () => { redrawEdges(); drawMinimap(); });
+    } else {
+      m = el('div', { class: 'placeholder' }, '🧊 3D model ready — use ⬇ Save to download the .glb');
+    }
   } else {
     m = el('img', { src: media.src });
+    m.addEventListener('load', () => { redrawEdges(); drawMinimap(); });
   }
-  m.addEventListener(media.kind === 'video' ? 'loadedmetadata' : 'load', () => { redrawEdges(); drawMinimap(); });
   return m;
 }
 
@@ -459,7 +511,8 @@ function actionRow(node, box) {
 function downloadNode(node) {
   const media = node.out.media;
   if (!media) return;
-  const a = el('a', { href: media.src, download: `artcanvas-${node.id}.${media.kind === 'video' ? 'mp4' : 'png'}` });
+  const ext = media.kind === 'video' ? 'mp4' : media.kind === 'model' ? 'glb' : 'png';
+  const a = el('a', { href: media.src, download: `artcanvas-${node.id}.${ext}` });
   if (!media.src.startsWith('data:')) a.target = '_blank';
   a.click();
 }
@@ -490,7 +543,16 @@ async function api(model, inputs) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
+  if (!data.jobId) return data; // direct result (older server)
+  // poll the job until it settles — survives proxy timeouts on long generations
+  for (;;) {
+    await new Promise(r => setTimeout(r, 2000));
+    const jr = await fetch('/api/jobs/' + data.jobId);
+    const j = await jr.json();
+    if (!jr.ok) throw new Error(j.error || 'Job lost');
+    if (j.status === 'done') return j.result;
+    if (j.status === 'error') throw new Error(j.error);
+  }
 }
 
 // Node creation --------------------------------------------------------
@@ -1437,8 +1499,8 @@ document.getElementById('btn-templates').addEventListener('click', () => {
 // Assets library (session) -----------------------------------------------
 const assets = [];
 const assetsPanel = document.getElementById('assets');
-function addAsset(kind, src, label) {
-  assets.unshift({ kind, src, label: (label || '').slice(0, 120) });
+function addAsset(kind, src, label, thumb) {
+  assets.unshift({ kind, src, label: (label || '').slice(0, 120), thumb: thumb || null });
   document.getElementById('assets-count').textContent = assets.length;
   if (!assetsPanel.hidden) renderAssets();
 }
@@ -1456,11 +1518,16 @@ function renderAssets() {
       m.muted = true;
       m.addEventListener('pointerenter', () => m.play());
       m.addEventListener('pointerleave', () => m.pause());
+    } else if (a2.kind === 'model') {
+      m = a2.thumb
+        ? el('img', { src: a2.thumb, title: a2.label + ' (3D — click to download .glb)' })
+        : el('div', { class: 'asset-3d', title: a2.label }, '🧊');
     } else {
       m = el('img', { src: a2.src, title: a2.label });
     }
     m.addEventListener('click', () => {
-      const link2 = el('a', { href: a2.src, download: `artcanvas-asset-${assets.length - idx}.${a2.kind === 'video' ? 'mp4' : 'png'}` });
+      const ext = a2.kind === 'video' ? 'mp4' : a2.kind === 'model' ? 'glb' : 'png';
+      const link2 = el('a', { href: a2.src, download: `artcanvas-asset-${assets.length - idx}.${ext}` });
       if (!a2.src.startsWith('data:')) link2.target = '_blank';
       link2.click();
     });

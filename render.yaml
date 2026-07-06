@@ -1,0 +1,26 @@
+# Render blueprint — deploys straight from the GitHub repo.
+# In the Render dashboard: New → Blueprint → pick this repo, then fill the env vars.
+services:
+  - type: web
+    name: artcanvas
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: node server.js
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SEEDANCE_API_KEY
+        sync: false
+      # cloud storage for projects (free-tier disk on Render is ephemeral,
+      # so point these at a Supabase project for durable storage)
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: artcanvas

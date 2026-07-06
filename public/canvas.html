@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ArtCanvas Studio — Node-based AI Design</title>
+<meta name="theme-color" content="#101012">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237c5cff'/%3E%3Cstop offset='1' stop-color='%23b98aff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='8' cy='8' r='7' fill='url(%23g)'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Top bar -->
+  <header id="topbar">
+    <div class="tb-group">
+      <a class="logo" href="./" title="Back to home"><span class="logo-dot"></span> ArtCanvas <span class="logo-sub">Studio</span></a>
+      <select id="project-select" title="Switch project"></select>
+      <button id="btn-new-project" class="icon-btn" title="New project">＋</button>
+      <button id="btn-rename-project" class="icon-btn" title="Rename project">✎</button>
+      <button id="btn-del-project" class="icon-btn" title="Delete project">🗑</button>
+    </div>
+    <div class="tb-group">
+      <button id="btn-chat">💬 Chat</button>
+      <button id="btn-templates">Templates</button>
+      <button id="btn-skills">Skills</button>
+      <button id="btn-assets">Assets <span id="assets-count" class="badge-n">0</span></button>
+      <button id="btn-export" class="icon-btn" title="Export project as JSON">⤓</button>
+      <button id="btn-import" class="icon-btn" title="Import project JSON">⤒</button>
+      <input id="import-file" type="file" accept="application/json" hidden>
+    </div>
+    <div class="tb-group">
+      <button id="btn-zoom-out" class="icon-btn" title="Zoom out">−</button>
+      <span id="zoom-label">100%</span>
+      <button id="btn-zoom-in" class="icon-btn" title="Zoom in">+</button>
+      <button id="btn-fit" title="Fit view (F)">Fit</button>
+      <span class="tb-sep"></span>
+      <button id="btn-clear">Clear</button>
+      <button id="btn-run-all" class="primary">▶ Run All</button>
+    </div>
+  </header>
+
+  <!-- Graph canvas -->
+  <div id="viewport">
+    <div id="world">
+      <svg id="edges-svg"></svg>
+      <div id="nodes-layer"></div>
+    </div>
+    <div id="empty-hint" hidden>
+      <h2>Blank canvas</h2>
+      <p>Double-click anywhere to add a node, pick one from the dock below,<br>
+      start from a <b>Template</b>, or open <b>💬 Chat</b> and let the agent build with you.</p>
+    </div>
+  </div>
+
+  <!-- Bottom dock (add nodes) -->
+  <nav id="dock">
+    <button data-add="prompt" title="Prompt — write text"><span class="dock-ic" style="--c:#b98aff">T</span>Prompt</button>
+    <button data-add="llm" title="LLM — transform text"><span class="dock-ic" style="--c:#8a7bff">✦</span>LLM</button>
+    <button data-add="imageModel" title="Image model"><span class="dock-ic" style="--c:#4cc9f0">◫</span>Image</button>
+    <button data-add="videoModel" title="Video model"><span class="dock-ic" style="--c:#ff9e64">▶</span>Video</button>
+    <button data-add="agent" title="Agent — Claude writes a shot script, then generates every shot"><span class="dock-ic" style="--c:#f0c542">✳</span>Agent</button>
+    <button data-add="upload" title="Upload an image"><span class="dock-ic" style="--c:#6ee7a0">⇧</span>Upload</button>
+    <button data-add="output" title="Output / preview"><span class="dock-ic" style="--c:#e8e8ec">◎</span>Output</button>
+    <span class="dock-hint">double-click canvas to search</span>
+  </nav>
+
+  <!-- Right properties panel -->
+  <aside id="props">
+    <div id="props-title">Properties</div>
+    <div id="props-body">
+      <div class="props-empty">Select a node to edit its settings.<br><br>
+        <b>Shortcuts</b><br>
+        Double-click — add node<br>
+        Drag pins — connect<br>
+        Ctrl+D — duplicate<br>
+        Del — delete<br>
+        F — fit view
+      </div>
+    </div>
+  </aside>
+
+  <!-- Minimap -->
+  <canvas id="minimap" width="192" height="128"></canvas>
+
+  <!-- Quick add palette -->
+  <div id="quickadd" hidden>
+    <input id="qa-input" type="text" placeholder="Search nodes…" autocomplete="off">
+    <div id="qa-list"></div>
+  </div>
+
+  <!-- Node context menu -->
+  <div id="ctxmenu" hidden></div>
+
+  <!-- Modal (skills / templates) -->
+  <div id="overlay" hidden>
+    <div id="modal">
+      <div id="modal-head"><span id="modal-title"></span><button id="modal-close">×</button></div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Agent chat -->
+  <aside id="chat" hidden>
+    <div class="chat-head">
+      <span>✳ Agent chat</span>
+      <button id="chat-close">×</button>
+    </div>
+    <div id="chat-cfg"></div>
+    <div id="chat-msgs"></div>
+    <form id="chat-form">
+      <textarea id="chat-input" rows="1" placeholder="Describe what you want to make…"></textarea>
+      <button type="submit" id="chat-send">➤</button>
+    </form>
+  </aside>
+
+  <!-- Assets library -->
+  <aside id="assets" hidden>
+    <div class="assets-head">Generated assets <button id="assets-close">×</button></div>
+    <div id="assets-grid"></div>
+    <div class="assets-hint">Everything generated this session. Click to download.</div>
+  </aside>
+
+<script src="app.js"></script>
+</body>
+</html>

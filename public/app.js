@@ -72,9 +72,9 @@ const NODE_TYPES = {
 
   imageModel: {
     title: 'Image', color: '#4cc9f0', desc: 'prompt → image',
-    inputs: [{ name: 'prompt', type: 'text' }, { name: 'image', type: 'image', optional: true, multi: 9 }],
+    inputs: refInputs,
     outputs: [{ name: 'image', type: 'image' }],
-    defaults: () => ({ model: '', aspect: 'auto', quality: 'auto' }),
+    defaults: () => ({ model: '', aspect: 'auto', quality: 'auto', refCount: 1 }),
     sub: (n) => modelLabel(n.data.model),
     media(node) {
       if (node.out.media) return mediaEl(node.out.media);
@@ -99,9 +99,10 @@ const NODE_TYPES = {
       actionRow(node, box);
     },
     async exec(node, inputs) {
+      const imgs = Object.keys(inputs).filter(k => /^image\d+$/.test(k)).map(k => v(inputs[k])).filter(Boolean);
       const r = await api(node.data.model, {
         prompt: v(inputs.prompt),
-        images: (inputs.image || []).map(v).filter(Boolean),
+        images: imgs.slice(0, 9),
         aspect: node.data.aspect,
         quality: node.data.quality,
       });
@@ -114,9 +115,9 @@ const NODE_TYPES = {
 
   videoModel: {
     title: 'Video', color: '#ff9e64', desc: 'prompt → video',
-    inputs: [{ name: 'prompt', type: 'text' }, { name: 'image', type: 'image', optional: true, multi: 9 }],
+    inputs: refInputs,
     outputs: [{ name: 'video', type: 'video' }],
-    defaults: () => ({ model: '', duration: '5', ratio: '16:9', quality: 'auto' }),
+    defaults: () => ({ model: '', duration: '5', ratio: '16:9', quality: 'auto', refCount: 1 }),
     sub: (n) => modelLabel(n.data.model),
     media(node) {
       if (node.out.media) return mediaEl(node.out.media);
@@ -137,9 +138,10 @@ const NODE_TYPES = {
       actionRow(node, box);
     },
     async exec(node, inputs) {
+      const imgs = Object.keys(inputs).filter(k => /^image\d+$/.test(k)).map(k => v(inputs[k])).filter(Boolean);
       const r = await api(node.data.model, {
         prompt: v(inputs.prompt),
-        images: (inputs.image || []).map(v).filter(Boolean),
+        images: imgs.slice(0, 9),
         duration: node.data.duration,
         ratio: node.data.ratio,
         quality: node.data.quality,
@@ -640,58 +642,31 @@ function actionRow(node, box) {
 // Reference uploader for Image/Video node props.
 // Each chosen image becomes an Upload node on the canvas, auto-wired into
 // this node's image input — so references live on the canvas, not hidden here.
-// Open a window listing image nodes already on the canvas; picking one wires
-// it into this node's image input as a reference (max 9).
-function pickReferences(node) {
-  const body = openModal('Add a reference from the canvas');
-  const already = edges.filter(e => e.to.node === node.id && e.to.port === 'image');
-  const linked = new Set(already.map(e => e.from.node));
-  const candidates = [...nodes.values()].filter(n =>
-    n.id !== node.id &&
-    !linked.has(n.id) &&
-    NODE_TYPES[n.type].outputs.some(o => o.type === 'image'));
-
-  body.appendChild(el('div', { class: 'modal-hint' },
-    'Pick an image node on the canvas to use as a reference — it gets wired into this node’s image input. ' +
-    'This node has ' + already.length + '/9 references.'));
-
-  if (already.length >= 9) {
-    body.appendChild(el('div', { class: 'rp-empty' }, 'Already at the 9-reference limit. Remove one first (select it and press Del).'));
-    return;
-  }
-  if (!candidates.length) {
-    body.appendChild(el('div', { class: 'rp-empty' }, 'No other image nodes on the canvas yet. Add an Upload node (dock ⇧), generate an image, or capture one from the 3D Director — then it’ll show up here.'));
-    return;
-  }
-  const grid = el('div', { class: 'rp-grid' });
-  for (const c of candidates) {
-    const item = el('div', { class: 'rp-item' });
-    const src = c.data?.image || (c.out?.media?.kind === 'image' ? c.out.media.src : null);
-    item.appendChild(src ? el('img', { src }) : el('div', { class: 'rp-thumb' }, '◫'));
-    item.appendChild(el('span', {}, c.data?.title || NODE_TYPES[c.type].title));
-    item.addEventListener('click', () => {
-      connectPorts(c.id, 'image', node.id, 'image', 'image');
-      closeModal();
-      toast('Reference linked');
-    });
-    grid.appendChild(item);
-  }
-  body.appendChild(grid);
+// Add one more image reference connector to the node; the user then drags it
+// to any image output on the canvas. No upload, no popup.
+function addRefPin(node) {
+  const cur = Math.max(1, node.data.refCount || 1);
+  if (cur >= 9) { toast('Up to 9 reference inputs'); return; }
+  node.data.refCount = cur + 1;
+  buildPins(node);
+  redrawEdges();
+  save();
+  toast('Added a reference input — drag it to an image output');
 }
 
-// The "＋ Add reference" button that lives at the bottom of Image/Video nodes.
+// The "＋ Add reference" button at the bottom of Image/Video nodes.
 function refButton(node) {
-  const b = el('button', { class: 'node-refbtn', title: 'Link another image node as a reference' }, '＋ Add reference');
-  b.addEventListener('click', (e) => { e.stopPropagation(); pickReferences(node); });
+  const b = el('button', { class: 'node-refbtn', title: 'Add another reference connector to wire an image in' }, '＋ Add reference');
+  b.addEventListener('click', (e) => { e.stopPropagation(); addRefPin(node); });
   return b;
 }
 
 function refControl(node, box) {
-  box.appendChild(el('label', {}, 'Reference images (up to 9)'));
-  const add = el('button', { class: 'ref-add' }, '＋ Add reference');
-  add.addEventListener('click', () => pickReferences(node));
+  box.appendChild(el('label', {}, 'References'));
+  const add = el('button', { class: 'ref-add' }, '＋ Add reference input');
+  add.addEventListener('click', () => addRefPin(node));
   box.appendChild(add);
-  box.appendChild(el('div', { class: 'mini-hint' }, 'Links another image node from the canvas into this node’s image input (max 9). You can also drag-wire nodes in, or delete a reference with Del.'));
+  box.appendChild(el('div', { class: 'mini-hint' }, 'Adds an image connector on the left of the node (up to 9). Drag each one to an image node’s output on the canvas.'));
 }
 
 function downloadNode(node) {
@@ -742,6 +717,47 @@ async function api(model, inputs) {
 }
 
 // Node creation --------------------------------------------------------
+// A node's input pins can depend on its data (e.g. growing reference inputs).
+function inputsOf(node) {
+  const def = NODE_TYPES[node.type];
+  return typeof def.inputs === 'function' ? def.inputs(node) : def.inputs;
+}
+function typeInputs(type) {
+  const def = NODE_TYPES[type];
+  return typeof def.inputs === 'function' ? def.inputs({ data: def.defaults() }) : def.inputs;
+}
+// prompt + N image reference pins (one per reference the node holds)
+function refInputs(node) {
+  const n = Math.max(1, Math.min(9, node?.data?.refCount || 1));
+  const pins = [{ name: 'prompt', type: 'text' }];
+  for (let i = 1; i <= n; i++) pins.push({ name: 'image' + i, type: 'image', optional: true, label: 'ref ' + i });
+  return pins;
+}
+// (re)build a node's input/output connector pins from its current inputs
+function buildPins(node) {
+  const div = node.el;
+  div.querySelectorAll('.pins').forEach(p => p.remove());
+  const left = el('div', { class: 'pins left' });
+  for (const p of inputsOf(node)) {
+    const wrap = el('div', { class: 'pin-wrap', 'data-port': p.name, 'data-dir': 'in', 'data-type': p.type });
+    const pin = el('div', { class: 'pin' });
+    wrap.appendChild(pin);
+    wrap.appendChild(el('span', { class: 'pin-label' }, (p.label || p.name) + (p.multi ? ` (up to ${p.multi})` : p.optional ? '' : '')));
+    bindPin(pin, node.id, p.name, 'in', p.type);
+    left.appendChild(wrap);
+  }
+  const right = el('div', { class: 'pins right' });
+  for (const p of NODE_TYPES[node.type].outputs) {
+    const wrap = el('div', { class: 'pin-wrap', 'data-port': p.name, 'data-dir': 'out', 'data-type': p.type });
+    const pin = el('div', { class: 'pin' });
+    wrap.appendChild(pin);
+    wrap.appendChild(el('span', { class: 'pin-label' }, p.name));
+    bindPin(pin, node.id, p.name, 'out', p.type);
+    right.appendChild(wrap);
+  }
+  div.querySelector('.node-head').after(left, right);
+}
+
 function addNode(type, x, y, data, id) {
   const def = NODE_TYPES[type];
   const node = {
@@ -765,27 +781,8 @@ function addNode(type, x, y, data, id) {
   head.appendChild(menuBtn);
   div.appendChild(head);
 
-  // pins
-  const left = el('div', { class: 'pins left' });
-  for (const p of def.inputs) {
-    const wrap = el('div', { class: 'pin-wrap', 'data-port': p.name, 'data-dir': 'in', 'data-type': p.type });
-    const pin = el('div', { class: 'pin' });
-    wrap.appendChild(pin);
-    wrap.appendChild(el('span', { class: 'pin-label' }, p.name + (p.multi ? ` (up to ${p.multi})` : p.optional ? ' (optional)' : '')));
-    bindPin(pin, node.id, p.name, 'in', p.type);
-    left.appendChild(wrap);
-  }
-  const right = el('div', { class: 'pins right' });
-  for (const p of def.outputs) {
-    const wrap = el('div', { class: 'pin-wrap', 'data-port': p.name, 'data-dir': 'out', 'data-type': p.type });
-    const pin = el('div', { class: 'pin' });
-    wrap.appendChild(pin);
-    wrap.appendChild(el('span', { class: 'pin-label' }, p.name));
-    bindPin(pin, node.id, p.name, 'out', p.type);
-    right.appendChild(wrap);
-  }
-  div.appendChild(left);
-  div.appendChild(right);
+  node.el = div;      // set early so buildPins() can query/attach
+  buildPins(node);    // input/output connectors (some nodes grow their inputs)
 
   div.appendChild(el('div', { class: 'node-media' }));
   if (def.footer) div.appendChild(def.footer(node));
@@ -794,7 +791,6 @@ function addNode(type, x, y, data, id) {
   const rz = el('div', { class: 'node-resize', title: 'Drag to resize width' });
   div.appendChild(rz);
 
-  node.el = div;
   nodesLayer.appendChild(div);
   nodes.set(node.id, node);
   makeResizable(node, rz);
@@ -1065,7 +1061,7 @@ function tryConnect(from, targetPin) {
   if (from.dir === to.dir || from.nodeId === to.nodeId) return;
   const [src, dst] = from.dir === 'out' ? [from, to] : [to, from];
   if (dst.type !== 'any' && src.type !== dst.type) return;
-  const dstDef = NODE_TYPES[nodes.get(dst.nodeId).type].inputs.find(i => i.name === dst.portName);
+  const dstDef = inputsOf(nodes.get(dst.nodeId)).find(i => i.name === dst.portName);
   const max = dstDef?.multi || 1;
   const existing = edges.filter(e => e.to.node === dst.nodeId && e.to.port === dst.portName);
   // no duplicate wire from the same source port
@@ -1102,7 +1098,7 @@ async function execNode(id, ctx) {
   const node = nodes.get(id);
   const def = NODE_TYPES[node.type];
   const inputs = {};
-  for (const p of def.inputs) {
+  for (const p of inputsOf(node)) {
     const inEdges = edges.filter(e => e.to.node === id && e.to.port === p.name);
     if (p.multi) {
       const vals = [];
@@ -1337,7 +1333,7 @@ function connectCandidates(from) {
   for (const [type, def] of Object.entries(NODE_TYPES)) {
     let port = null;
     if (from.dir === 'out') {
-      const p = def.inputs.find(i => i.type === from.type || i.type === 'any');
+      const p = typeInputs(type).find(i => i.type === from.type || i.type === 'any');
       if (p) port = p.name;
     } else {
       const o = def.outputs.find(o => from.type === 'any' || o.type === from.type);
@@ -1351,7 +1347,7 @@ function connectCandidates(from) {
 function connectPorts(srcId, srcPort, dstId, dstPort, type) {
   if (srcId === dstId) return;
   const dstNode = nodes.get(dstId);
-  const dstDef = NODE_TYPES[dstNode.type].inputs.find(i => i.name === dstPort);
+  const dstDef = inputsOf(dstNode).find(i => i.name === dstPort);
   const max = dstDef?.multi || 1;
   const existing = edges.filter(e => e.to.node === dstId && e.to.port === dstPort);
   if (existing.some(e => e.from.node === srcId && e.from.port === srcPort)) return;
@@ -1666,6 +1662,14 @@ function loadGraph(data) {
     if (NODE_TYPES[n.type]) addNode(n.type, n.x, n.y, n.data, n.id);
   }
   edges = (data.edges || []).filter(e => nodes.has(e.from.node) && nodes.has(e.to.node));
+  // migrate legacy single 'image' input → numbered reference pins (image1..N)
+  for (const n of nodes.values()) {
+    if (n.type !== 'imageModel' && n.type !== 'videoModel') continue;
+    const imgEdges = edges.filter(e => e.to.node === n.id && (e.to.port === 'image' || /^image\d+$/.test(e.to.port)));
+    n.data.refCount = Math.max(1, imgEdges.length, n.data.refCount || 1);
+    imgEdges.forEach((e, i) => { e.to.port = 'image' + (i + 1); });
+    buildPins(n);
+  }
   chatHistory = Array.isArray(data.chat) ? data.chat : [];
   renderChat();
   redrawEdges();

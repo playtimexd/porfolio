@@ -195,29 +195,37 @@ const NODE_TYPES = {
   },
 
   upload: {
-    title: 'Upload', color: '#6ee7a0', desc: 'image',
-    inputs: [], outputs: [{ name: 'image', type: 'image' }],
-    defaults: () => ({ image: null }),
-    sub: (n) => n.data.image ? 'image' : 'empty',
+    title: 'Upload', color: '#6ee7a0', desc: 'image / video',
+    inputs: [],
+    // output type follows the uploaded file (image or video)
+    outputs: (node) => { const k = node?.data?.kind === 'video' ? 'video' : 'image'; return [{ name: k, type: k }]; },
+    defaults: () => ({ image: null, kind: 'image' }),
+    sub: (n) => n.data.image ? (n.data.kind || 'image') : 'empty',
     media(node) {
-      if (node.data.image) return mediaEl({ kind: 'image', src: node.data.image });
-      return el('div', { class: 'placeholder' }, 'Choose a file in the panel →');
+      if (node.data.image) return mediaEl({ kind: node.data.kind || 'image', src: node.data.image });
+      return el('div', { class: 'placeholder' }, 'Choose an image or video in the panel →');
     },
     props(node, box) {
-      box.appendChild(el('label', {}, 'Image file'));
-      const inp = el('input', { type: 'file', accept: 'image/*' });
+      box.appendChild(el('label', {}, 'Image or video file'));
+      const inp = el('input', { type: 'file', accept: 'image/*,video/*' });
       inp.addEventListener('change', () => {
         const f = inp.files[0];
         if (!f) return;
         const fr = new FileReader();
-        fr.onload = () => { node.data.image = fr.result; refreshMedia(node); updateHead(node); save(); };
+        fr.onload = () => {
+          node.data.image = fr.result;
+          node.data.kind = (f.type || '').startsWith('video') ? 'video' : 'image';
+          buildPins(node);   // output pin type follows the file kind
+          refreshMedia(node); updateHead(node); redrawEdges(); save();
+        };
         fr.readAsDataURL(f);
       });
       box.appendChild(inp);
     },
     async exec(node) {
-      if (!node.data.image) throw new Error('No image uploaded');
-      return { image: { type: 'image', value: node.data.image } };
+      if (!node.data.image) throw new Error('Nothing uploaded');
+      const k = node.data.kind === 'video' ? 'video' : 'image';
+      return { [k]: { type: k, value: node.data.image } };
     },
   },
 
@@ -729,6 +737,14 @@ function typeInputs(type) {
   const def = NODE_TYPES[type];
   return typeof def.inputs === 'function' ? def.inputs({ data: def.defaults() }) : def.inputs;
 }
+function outputsOf(node) {
+  const def = NODE_TYPES[node.type];
+  return typeof def.outputs === 'function' ? def.outputs(node) : def.outputs;
+}
+function typeOutputs(type) {
+  const def = NODE_TYPES[type];
+  return typeof def.outputs === 'function' ? def.outputs({ data: def.defaults() }) : def.outputs;
+}
 // prompt + N image reference pins (one per reference the node holds)
 function refInputs(node) {
   const n = Math.max(1, Math.min(9, node?.data?.refCount || 1));
@@ -752,7 +768,7 @@ function buildPins(node) {
     left.appendChild(wrap);
   }
   const right = el('div', { class: 'pins right' });
-  for (const p of NODE_TYPES[node.type].outputs) {
+  for (const p of outputsOf(node)) {
     const wrap = el('div', { class: 'pin-wrap', 'data-port': p.name, 'data-dir': 'out', 'data-type': p.type });
     const pin = el('div', { class: 'pin' });
     wrap.appendChild(pin);
@@ -1346,7 +1362,7 @@ function connectCandidates(from) {
       const p = typeInputs(type).find(i => i.type === from.type || i.type === 'any');
       if (p) port = p.name;
     } else {
-      const o = def.outputs.find(o => from.type === 'any' || o.type === from.type);
+      const o = typeOutputs(type).find(o => from.type === 'any' || o.type === from.type);
       if (o) port = o.name;
     }
     if (port) out.push({ type, port });
@@ -1397,7 +1413,7 @@ function quickAddType(type, port) {
     const from = connect.from;
     if (from.dir === 'out') connectPorts(from.nodeId, from.portName, node.id, port, from.type);
     else {
-      const t = NODE_TYPES[type].outputs.find(o => o.name === port)?.type || from.type;
+      const t = typeOutputs(type).find(o => o.name === port)?.type || from.type;
       connectPorts(node.id, port, from.nodeId, from.portName, t);
     }
   }
@@ -1696,7 +1712,7 @@ function link(a, ap, b, bp) {
     id: 'e' + idCounter++,
     from: { node: a.id, port: ap },
     to: { node: b.id, port: bp },
-    type: NODE_TYPES[a.type].outputs.find(o => o.name === ap).type,
+    type: outputsOf(a).find(o => o.name === ap).type,
   });
 }
 

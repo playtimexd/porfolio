@@ -742,7 +742,7 @@ function renderProps(node) {
   if (!node) {
     propsTitle.textContent = 'Properties';
     const d = el('div', { class: 'props-empty' });
-    d.innerHTML = 'Select a node to edit its settings.<br><br><b>Shortcuts</b><br>Double-click — add node<br>Drag pins — connect<br>Ctrl+D — duplicate<br>Del — delete<br>F — fit view';
+    d.innerHTML = 'Select a node to edit its settings.<br><br><b>Shortcuts</b><br>Double-click — add node<br>Drag pins — connect<br>Arrow keys — nudge (Shift = faster)<br>Ctrl+D — duplicate<br>Del — delete<br>F — fit view';
     propsBody.appendChild(d);
     return;
   }
@@ -784,6 +784,22 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key.toLowerCase() === 'd' && (e.ctrlKey || e.metaKey) && selected?.kind === 'node') {
     e.preventDefault();
     duplicateNode(selected.id);
+  } else if (selected?.kind === 'node' && e.key.startsWith('Arrow')) {
+    // nudge the selected node with the arrow keys (Shift = larger step)
+    e.preventDefault();
+    const node = nodes.get(selected.id);
+    if (node) {
+      const step = e.shiftKey ? 40 : 8;
+      if (e.key === 'ArrowLeft') node.x -= step;
+      else if (e.key === 'ArrowRight') node.x += step;
+      else if (e.key === 'ArrowUp') node.y -= step;
+      else if (e.key === 'ArrowDown') node.y += step;
+      node.el.style.left = node.x + 'px';
+      node.el.style.top = node.y + 'px';
+      redrawEdges();
+      drawMinimap();
+      save();
+    }
   } else if (e.key.toLowerCase() === 'f') {
     fitView();
   }
@@ -1581,6 +1597,16 @@ const TEMPLATES = [
       const vd = addNode('videoModel', 740, 160);
       const o = addNode('output', 1080, 200);
       link(p, 'text', i, 'prompt'); link(p, 'text', vd, 'prompt'); link(i, 'image', vd, 'image'); link(vd, 'video', o, 'media');
+    },
+  },
+  {
+    name: '3D previs → render', desc: '3D Director (block a shot) → Image model (img2img) → Output',
+    build() {
+      const d = addNode('threeDirector', 60, 60);
+      const p = addNode('prompt', 60, 520);
+      const i = addNode('imageModel', 700, 220);
+      const o = addNode('output', 1040, 250);
+      link(d, 'image', i, 'image'); link(p, 'text', i, 'prompt'); link(i, 'image', o, 'media');
     },
   },
 ];

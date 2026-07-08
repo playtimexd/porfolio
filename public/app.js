@@ -897,9 +897,13 @@ document.addEventListener('keydown', (e) => {
     else clearSelection();
     return;
   }
-  // Ctrl/Cmd+Enter runs the whole graph (unless typing in the chat)
+  // Ctrl/Cmd+Enter runs the selected node (unless typing in the chat)
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-    if (!e.target.closest?.('#chat')) { e.preventDefault(); document.getElementById('btn-run-all').click(); }
+    if (!e.target.closest?.('#chat')) {
+      e.preventDefault();
+      if (selected?.kind === 'node') runGraph([selected.id]);
+      else toast('Select a node, then Ctrl+Enter to run it');
+    }
     return;
   }
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
@@ -1157,23 +1161,12 @@ let running = false;
 async function runGraph(targetIds) {
   if (running) return;
   running = true;
-  const btn = document.getElementById('btn-run-all');
-  btn.disabled = true;
-  btn.textContent = '⏳ Running…';
   const ctx = { results: new Map(), pending: new Set() };
   for (const id of targetIds) {
     try { await execNode(id, ctx); } catch { /* shown on node */ }
   }
   running = false;
-  btn.disabled = false;
-  btn.textContent = '▶ Run All';
 }
-
-document.getElementById('btn-run-all').addEventListener('click', () => {
-  const terminals = [...nodes.keys()].filter(id => !edges.some(e => e.from.node === id));
-  if (terminals.length) runGraph(terminals);
-  else toast('Nothing to run — add some nodes first');
-});
 
 // Pan & zoom -----------------------------------------------------------
 function applyTransform() {

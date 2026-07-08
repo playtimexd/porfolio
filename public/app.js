@@ -70,40 +70,6 @@ const NODE_TYPES = {
     },
   },
 
-  llm: {
-    title: 'LLM', color: '#8a7bff', desc: 'text → text',
-    inputs: [{ name: 'prompt', type: 'text' }, { name: 'image', type: 'image', optional: true, multi: 9 }],
-    outputs: [{ name: 'text', type: 'text' }],
-    defaults: () => ({ model: '', instruction: 'Rewrite this as a single, detailed, professional image-generation prompt. Reply with the prompt only.', skills: [] }),
-    sub: (n) => modelLabel(n.data.model),
-    media(node) {
-      if (node.out.text) { const d = el('div', { class: 'text-out' }); d.textContent = node.out.text; return d; }
-      return el('div', { class: 'placeholder' }, 'No output yet');
-    },
-    props(node, box) {
-      box.appendChild(el('label', {}, 'Model'));
-      box.appendChild(modelSelect(node, 'llm', 'model', 'fast'));
-      box.appendChild(el('div', { class: 'mini-hint' }, 'Defaults to the fast tier — prompt rewriting rarely needs a frontier model.'));
-      box.appendChild(el('label', {}, 'Instruction (prepended to input)'));
-      const ta = el('textarea');
-      ta.value = node.data.instruction || '';
-      ta.addEventListener('input', () => { node.data.instruction = ta.value; save(); });
-      box.appendChild(ta);
-      skillChecks(node, box);
-    },
-    async exec(node, inputs) {
-      const r = await api(node.data.model, {
-        prompt: v(inputs.prompt),
-        images: (inputs.image || []).map(v).filter(Boolean),
-        system: [node.data.instruction, skillsTextFor(node)].filter(Boolean).join('\n\n') || undefined,
-        maxTokens: 2000,
-      });
-      node.out.text = r.text;
-      refreshMedia(node);
-      return { text: { type: 'text', value: r.text } };
-    },
-  },
-
   imageModel: {
     title: 'Image', color: '#4cc9f0', desc: 'prompt → image',
     inputs: [{ name: 'prompt', type: 'text' }, { name: 'image', type: 'image', optional: true, multi: 9 }],
@@ -243,151 +209,6 @@ const NODE_TYPES = {
     async exec(node) {
       if (!node.data.image) throw new Error('No image uploaded');
       return { image: { type: 'image', value: node.data.image } };
-    },
-  },
-
-  agent: {
-    title: 'Agent', color: '#f0c542', desc: 'brief → shot series',
-    inputs: [{ name: 'brief', type: 'text' }, { name: 'reference', type: 'image', optional: true, multi: 9 }],
-    outputs: [{ name: 'script', type: 'text' }],
-    defaults: () => ({ model: '', genModel: '', kind: 'image', count: '4', aspect: 'auto', duration: '5', ratio: '16:9', quality: 'auto', subagents: 'off', skills: [] }),
-    sub: (n) => modelLabel(n.data.model),
-    media(node) {
-      if (node.out.items?.length) {
-        const g = el('div', { class: 'gallery' });
-        for (const it of node.out.items) {
-          let m;
-          if (it.kind === 'video') {
-            m = el('video', { src: it.src, controls: '', loop: '', title: it.prompt });
-            m.muted = true;
-            m.addEventListener('loadedmetadata', redrawEdges);
-          } else {
-            m = el('img', { src: it.src, title: it.prompt });
-            m.addEventListener('load', redrawEdges);
-            m.addEventListener('click', () => {
-              const a = el('a', { href: it.src, download: `artcanvas-shot-${node.out.items.indexOf(it) + 1}.png` });
-              if (!it.src.startsWith('data:')) a.target = '_blank';
-              a.click();
-            });
-          }
-          g.appendChild(m);
-        }
-        return g;
-      }
-      return el('div', { class: 'placeholder' }, 'The agent writes a shot script with Claude, then generates every shot in sequence');
-    },
-    props(node, box) {
-      box.appendChild(el('label', {}, 'Agent LLM (orchestrator)'));
-      box.appendChild(modelSelect(node, 'llm', 'model', 'smart'));
-      box.appendChild(el('label', {}, 'Mode'));
-      box.appendChild(selectCtl(node, 'subagents', [
-        ['off', 'Orchestrator only'],
-        ['on', 'Orchestrator + sub-agents'],
-      ]));
-      box.appendChild(el('div', { class: 'mini-hint' }, 'To save tokens, sub-agents automatically run on the same provider’s fast tier (GPT mini / Haiku / Flash).'));
-      box.appendChild(el('label', {}, 'Generate'));
-      const kindSel = selectCtl(node, 'kind', [['image', 'Images'], ['video', 'Videos']]);
-      kindSel.addEventListener('change', () => { node.data.genModel = ''; renderProps(node); });
-      box.appendChild(kindSel);
-      box.appendChild(el('label', {}, node.data.kind === 'video' ? 'Video model' : 'Image model'));
-      box.appendChild(modelSelect(node, node.data.kind, 'genModel'));
-      const row = el('div', { class: 'row' });
-      const c1 = el('div');
-      c1.appendChild(el('label', {}, 'Shots'));
-      c1.appendChild(selectCtl(node, 'count', [['2', '2'], ['3', '3'], ['4', '4'], ['6', '6'], ['8', '8'], ['9', '9']]));
-      row.appendChild(c1);
-      const c2 = el('div');
-      if (node.data.kind === 'video') {
-        c2.appendChild(el('label', {}, 'Duration'));
-        c2.appendChild(selectCtl(node, 'duration', [['4', '4s'], ['5', '5s'], ['8', '8s'], ['10', '10s']]));
-        const c3 = el('div');
-        c3.appendChild(el('label', {}, 'Ratio'));
-        c3.appendChild(selectCtl(node, 'ratio', VIDEO_RATIO_OPTS));
-        const c4 = el('div');
-        c4.appendChild(el('label', {}, 'Quality'));
-        c4.appendChild(selectCtl(node, 'quality', VIDEO_QUALITY_OPTS));
-        row.appendChild(c2);
-        row.appendChild(c3);
-        row.appendChild(c4);
-      } else {
-        normRatio(node, 'aspect');
-        c2.appendChild(el('label', {}, 'Aspect'));
-        c2.appendChild(selectCtl(node, 'aspect', RATIO_OPTS));
-        const c4 = el('div');
-        c4.appendChild(el('label', {}, 'Quality'));
-        c4.appendChild(selectCtl(node, 'quality', QUALITY_OPTS));
-        row.appendChild(c2);
-        row.appendChild(c4);
-      }
-      box.appendChild(row);
-      skillChecks(node, box);
-      actionRow(node, box);
-    },
-    async exec(node, inputs) {
-      const count = Number(node.data.count);
-      const brief = v(inputs.brief);
-      const refs = (inputs.reference || []).map(v).filter(Boolean);
-      const skills = skillsTextFor(node);
-      const system = ['You are the orchestrator agent of a creative pipeline. You plan work, delegate to sub-agents when available, and enforce continuity across the whole series.', skills].filter(Boolean).join('\n\n');
-      setState(node, 'running', 'Orchestrator writing shot script…');
-      const scriptPrompt =
-        `You are a creative director planning a sequence of ${count} ${node.data.kind === 'video' ? 'video shots' : 'images'} that tell one continuous visual story.\n` +
-        `Keep characters, art style, color palette and lighting consistent across all shots so the series reads as one production. ` +
-        `Each prompt must be self-contained (restate the shared style and characters), detailed, and professional.\n` +
-        `Return JSON only, in the shape {"shots": [{"prompt": "..."}]}, with exactly ${count} shots.\n` +
-        (refs.length ? `${refs.length} reference image(s) are attached — match their subjects, style and mood across all shots.\n` : '') +
-        `\nBrief: ${brief}`;
-      const r = await api(node.data.model, { prompt: scriptPrompt, format: 'json', images: refs, system, maxTokens: 4000 });
-      let shots;
-      try {
-        shots = JSON.parse(r.text).shots;
-      } catch {
-        const m = r.text.match(/\{[\s\S]*\}/);
-        if (m) try { shots = JSON.parse(m[0]).shots; } catch { /* fall through */ }
-      }
-      if (!Array.isArray(shots) || !shots.length) throw new Error('Agent did not return a valid shot list');
-      shots = shots.slice(0, count).filter(s => s?.prompt);
-
-      // sub-agent stage: each shot is refined by its own specialist LLM call, in parallel
-      if (node.data.subagents === 'on') {
-        let done = 0;
-        const subModel = fastVariantOf(node.data.model);
-        setState(node, 'running', `Sub-agents refining shots 0/${shots.length} (${modelLabel(subModel)})…`);
-        shots = await Promise.all(shots.map((s, i) =>
-          api(subModel, {
-            system: [
-              `You are sub-agent #${i + 1}, a specialist prompt engineer working under an orchestrator. You own exactly one shot of a ${shots.length}-shot series and must keep continuity with the rest.`,
-              skills,
-            ].filter(Boolean).join('\n\n'),
-            prompt:
-              `Overall brief from the orchestrator:\n${brief}\n\n` +
-              `Your assigned shot (${i + 1} of ${shots.length}): ${s.prompt}\n\n` +
-              `Rewrite it into one final, highly detailed ${node.data.kind} generation prompt. ` +
-              `Restate the shared characters, style, palette and lighting so this shot matches the series. Reply with the prompt only.`,
-            images: refs,
-            maxTokens: 800,
-          }).then(res => {
-            done++;
-            setState(node, 'running', `Sub-agents refining shots ${done}/${shots.length}…`);
-            return { prompt: res.text.trim() };
-          })
-        ));
-      }
-
-      node.out.items = [];
-      for (let i = 0; i < shots.length; i++) {
-        setState(node, 'running', `Generating shot ${i + 1}/${shots.length}…`);
-        const p = shots[i].prompt;
-        const g = node.data.kind === 'video'
-          ? await api(node.data.genModel, { prompt: p, duration: node.data.duration, ratio: node.data.ratio, quality: node.data.quality })
-          : await api(node.data.genModel, { prompt: p, aspect: node.data.aspect, quality: node.data.quality });
-        const src = node.data.kind === 'video' ? g.video : g.image;
-        node.out.items.push({ kind: node.data.kind, src, prompt: p });
-        addAsset(node.data.kind, src, p);
-        refreshMedia(node);
-      }
-      const script = shots.map((s, i) => `Shot ${i + 1}: ${s.prompt}`).join('\n\n');
-      return { script: { type: 'text', value: script } };
     },
   },
 
@@ -1931,22 +1752,12 @@ document.getElementById('import-file').addEventListener('change', (e) => {
 // Templates -------------------------------------------------------------
 const TEMPLATES = [
   {
-    name: 'Enhance & generate', desc: 'Prompt → LLM (rewrites your idea) → Image model → Output',
+    name: 'Generate image', desc: 'Prompt → Image model → Output',
     build() {
       const p = addNode('prompt', 60, 200);
-      const l = addNode('llm', 400, 160);
-      const i = addNode('imageModel', 740, 160);
-      const o = addNode('output', 1080, 200);
-      link(p, 'text', l, 'prompt'); link(l, 'text', i, 'prompt'); link(i, 'image', o, 'media');
-    },
-  },
-  {
-    name: 'Agent storyboard', desc: 'Prompt → Agent (orchestrator + sub-agents, Claude) → Output script',
-    build() {
-      const p = addNode('prompt', 60, 200);
-      const a = addNode('agent', 420, 140, { subagents: 'on' });
-      const o = addNode('output', 800, 200);
-      link(p, 'text', a, 'brief'); link(a, 'script', o, 'media');
+      const i = addNode('imageModel', 460, 170);
+      const o = addNode('output', 820, 200);
+      link(p, 'text', i, 'prompt'); link(i, 'image', o, 'media');
     },
   },
   {

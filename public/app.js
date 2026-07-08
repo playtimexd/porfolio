@@ -74,7 +74,7 @@ const NODE_TYPES = {
     title: 'Image', color: '#4cc9f0', desc: 'prompt → image',
     inputs: [{ name: 'prompt', type: 'text' }, { name: 'image', type: 'image', optional: true, multi: 9 }],
     outputs: [{ name: 'image', type: 'image' }],
-    defaults: () => ({ model: '', aspect: 'auto', quality: 'auto', refs: [] }),
+    defaults: () => ({ model: '', aspect: 'auto', quality: 'auto' }),
     sub: (n) => modelLabel(n.data.model),
     media(node) {
       if (node.out.media) return mediaEl(node.out.media);
@@ -94,14 +94,13 @@ const NODE_TYPES = {
       row.appendChild(c1); row.appendChild(c2);
       box.appendChild(row);
       box.appendChild(el('div', { class: 'mini-hint' }, 'Gemini honours every ratio + 2K/4K; GPT Image maps to its nearest canvas.'));
-      refControl(node, box, false);
+      refControl(node, box);
       actionRow(node, box);
     },
     async exec(node, inputs) {
-      const refImgs = (node.data.refs || []).filter(r => r.kind === 'image').map(r => r.src);
       const r = await api(node.data.model, {
         prompt: v(inputs.prompt),
-        images: [...(inputs.image || []).map(v).filter(Boolean), ...refImgs].slice(0, 9),
+        images: (inputs.image || []).map(v).filter(Boolean),
         aspect: node.data.aspect,
         quality: node.data.quality,
       });
@@ -116,7 +115,7 @@ const NODE_TYPES = {
     title: 'Video', color: '#ff9e64', desc: 'prompt → video',
     inputs: [{ name: 'prompt', type: 'text' }, { name: 'image', type: 'image', optional: true, multi: 9 }],
     outputs: [{ name: 'video', type: 'video' }],
-    defaults: () => ({ model: '', duration: '5', ratio: '16:9', quality: 'auto', refs: [] }),
+    defaults: () => ({ model: '', duration: '5', ratio: '16:9', quality: 'auto' }),
     sub: (n) => modelLabel(n.data.model),
     media(node) {
       if (node.out.media) return mediaEl(node.out.media);
@@ -132,16 +131,13 @@ const NODE_TYPES = {
       row.appendChild(c1); row.appendChild(c2); row.appendChild(c3);
       box.appendChild(row);
       box.appendChild(el('div', { class: 'mini-hint' }, '1080p-class output needs Sora 2 Pro or Seedance; Sora 2 runs at 720p.'));
-      refControl(node, box, true);
+      refControl(node, box);
       actionRow(node, box);
     },
     async exec(node, inputs) {
-      const refImgs = (node.data.refs || []).filter(r => r.kind === 'image').map(r => r.src);
-      const refVid = (node.data.refs || []).find(r => r.kind === 'video')?.src;
       const r = await api(node.data.model, {
         prompt: v(inputs.prompt),
-        images: [...(inputs.image || []).map(v).filter(Boolean), ...refImgs].slice(0, 9),
-        video: refVid,
+        images: (inputs.image || []).map(v).filter(Boolean),
         duration: node.data.duration,
         ratio: node.data.ratio,
         quality: node.data.quality,
@@ -639,45 +635,30 @@ function actionRow(node, box) {
   box.appendChild(row);
 }
 
-// Reference uploader shown in Image/Video node props.
-// allowVideo=true permits at most one video reference (plus any images).
-function refControl(node, box, allowVideo) {
-  node.data.refs ||= [];
-  box.appendChild(el('label', {}, allowVideo ? 'References (images + 1 video)' : 'Reference images'));
-  const strip = el('div', { class: 'ref-strip' });
-  const render = () => {
-    strip.innerHTML = '';
-    node.data.refs.forEach((r, i) => {
-      const chip = el('div', { class: 'ref-chip' });
-      chip.appendChild(r.kind === 'video'
-        ? Object.assign(el('video', { src: r.src }), { muted: true })
-        : el('img', { src: r.src }));
-      const x = el('button', { type: 'button', title: 'Remove' }, '✕');
-      x.addEventListener('click', () => { node.data.refs.splice(i, 1); render(); save(); });
-      chip.appendChild(x);
-      strip.appendChild(chip);
-    });
-    if (!node.data.refs.length) strip.appendChild(el('span', { class: 'ref-empty' }, 'None yet'));
-  };
-  box.appendChild(strip);
-  const add = el('button', { class: 'ref-add' }, '＋ Add reference');
-  const input = el('input', { type: 'file', accept: allowVideo ? 'image/*,video/*' : 'image/*', multiple: '', hidden: '' });
+// Reference uploader for Image/Video node props.
+// Each chosen image becomes an Upload node on the canvas, auto-wired into
+// this node's image input — so references live on the canvas, not hidden here.
+function refControl(node, box) {
+  box.appendChild(el('label', {}, 'Reference images'));
+  const add = el('button', { class: 'ref-add' }, '＋ Add reference image');
+  const input = el('input', { type: 'file', accept: 'image/*', multiple: '', hidden: '' });
   add.addEventListener('click', () => input.click());
   input.addEventListener('change', () => {
+    let off = 0;
     for (const f of input.files) {
-      const kind = (f.type || '').startsWith('video') ? 'video' : 'image';
-      if (kind === 'video' && !allowVideo) { toast('This node takes image references only'); continue; }
-      if (kind === 'video' && node.data.refs.some(r => r.kind === 'video')) { toast('Only one video reference allowed'); continue; }
-      if (node.data.refs.length >= 9) { toast('Up to 9 references'); break; }
+      const oy = node.y + off; off += 150;
       const fr = new FileReader();
-      fr.onload = () => { node.data.refs.push({ kind, src: fr.result }); render(); save(); };
+      fr.onload = () => {
+        const u = addNode('upload', node.x - 300, oy, { image: fr.result, title: 'Reference' });
+        connectPorts(u.id, 'image', node.id, 'image', 'image');
+      };
       fr.readAsDataURL(f);
     }
     input.value = '';
   });
   box.appendChild(add);
   box.appendChild(input);
-  render();
+  box.appendChild(el('div', { class: 'mini-hint' }, 'Drops an image node on the canvas, wired into this node’s image input. Add several, or wire your own.'));
 }
 
 function downloadNode(node) {

@@ -761,12 +761,13 @@ button.danger:hover { background: rgba(229,72,77,.15); }
 #chat-close:hover { color: var(--text); background: none; }
 #chat-cfg {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
 #chat-cfg select {
-  flex: 1;
+  flex: 1 1 calc(50% - 3px);
   min-width: 0;
   background: var(--panel-2);
   border: 1px solid var(--border);

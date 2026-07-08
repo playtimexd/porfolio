@@ -1748,7 +1748,7 @@ document.getElementById('assets-close').addEventListener('click', () => { assets
 // Agent chat --------------------------------------------------------------
 let chatHistory = [];
 let chatBusy = false;
-const chatCfg = { model: '', imageModel: '', videoModel: '' };
+const chatCfg = { model: '', imageModel: '', videoModel: '', aspect: '' };
 const chatPanel = document.getElementById('chat');
 const chatMsgs = document.getElementById('chat-msgs');
 const chatInput = document.getElementById('chat-input');
@@ -1827,12 +1827,24 @@ function chatModelSelect(kind, key) {
   return sel;
 }
 
+function chatAspectSelect() {
+  const sel = el('select', { title: 'Aspect ratio for generated images (Auto = the agent picks per request)' });
+  for (const [val, label] of RATIO_OPTS) {
+    sel.appendChild(el('option', { value: val }, val === 'auto' ? '⬗ Auto ratio' : label));
+  }
+  if (!chatCfg.aspect) chatCfg.aspect = PREFS['chat:aspect'] || 'auto';
+  sel.value = chatCfg.aspect;
+  sel.addEventListener('change', () => { chatCfg.aspect = sel.value; setPref('chat:aspect', sel.value); });
+  return sel;
+}
+
 function buildChatCfg() {
   const cfg = document.getElementById('chat-cfg');
   cfg.innerHTML = '';
   cfg.appendChild(chatModelSelect('llm', 'model'));
   cfg.appendChild(chatModelSelect('image', 'imageModel'));
   cfg.appendChild(chatModelSelect('video', 'videoModel'));
+  cfg.appendChild(chatAspectSelect());
 }
 
 // Lovart-style quick-start chips shown when the chat is empty
@@ -2012,9 +2024,10 @@ async function runChatGeneration(kind, shots, refImgs) {
     for (let i = 0; i < shots.length; i++) {
       msg.text = `Generating ${kind} ${i + 1}/${shots.length}…`;
       renderChat();
+      const forced = chatCfg.aspect && chatCfg.aspect !== 'auto' ? chatCfg.aspect : null;
       const g = kind === 'video'
-        ? await api(model, { prompt: shots[i].prompt, duration: shots[i].duration || '5', ratio: shots[i].aspect || shots[i].ratio || '16:9', image: refImgs?.[0] })
-        : await api(model, { prompt: shots[i].prompt, aspect: shots[i].aspect || '16:9', images: refImgs?.length ? refImgs : undefined });
+        ? await api(model, { prompt: shots[i].prompt, duration: shots[i].duration || '5', ratio: forced || shots[i].aspect || shots[i].ratio || '16:9', image: refImgs?.[0] })
+        : await api(model, { prompt: shots[i].prompt, aspect: forced || shots[i].aspect || '16:9', images: refImgs?.length ? refImgs : undefined });
       const src = kind === 'video' ? g.video : g.image;
       msg.media.push({ kind, src, prompt: shots[i].prompt });
       addAsset(kind, src, shots[i].prompt);

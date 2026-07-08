@@ -614,7 +614,7 @@ function buildImageEditor() {
   const toCanvasBtn = el('button', { class: 'primary' }, '＋ Save to canvas');
   toCanvasBtn.addEventListener('click', () => {
     const r = viewport.getBoundingClientRect();
-    addNode('upload', (r.width / 2 - panX) / zoom - 130, (r.height / 2 - panY) / zoom - 90, { image: imgEditor.src });
+    addNode('upload', (r.width / 2 - panX) / zoom - 130, (r.height / 2 - panY) / zoom - 90, { image: imgEditor.src, title: 'Image' });
     addAsset('image', imgEditor.src, 'edited image');
     toast('Edited image added to the canvas');
   });
@@ -695,7 +695,7 @@ async function multiAngle() {
     for (const [name, prompt] of angles) {
       setEditorStatus(`Generating ${++n}/4 — ${name}…`, true);
       const g = await api(model, { prompt, images: [base], aspect: 'auto' });
-      if (g.image) { addNode('upload', ox, oy, { image: g.image }); addAsset('image', g.image, 'angle: ' + name); ox += 44; oy += 44; }
+      if (g.image) { addNode('upload', ox, oy, { image: g.image, title: 'Image' }); addAsset('image', g.image, 'angle: ' + name); ox += 44; oy += 44; }
     }
     setEditorStatus('4 angles added to the canvas ✓');
     toast('Multi-angle views added to the canvas');
@@ -897,7 +897,7 @@ function addNode(type, x, y, data, id) {
   const head = el('div', { class: 'node-head' });
   head.style.setProperty('--hc', def.color);
   head.appendChild(el('span', { class: 'hdot' }));
-  head.appendChild(document.createTextNode(def.title));
+  head.appendChild(document.createTextNode(node.data.title || def.title));
   head.appendChild(el('span', { class: 'sub' }));
   const menuBtn = el('button', { class: 'menu', title: 'Node menu' }, '⋯');
   menuBtn.addEventListener('click', (e) => { e.stopPropagation(); openCtxMenu(node, e.clientX, e.clientY); });
@@ -1323,7 +1323,7 @@ window.addEventListener('message', (e) => {
   let wx = (vr.width / 2 - panX) / zoom - 130;
   let wy = (vr.height / 2 - panY) / zoom - 90;
   for (const c of caps) {
-    const node = addNode('upload', wx, wy, { image: c.dataUrl });
+    const node = addNode('upload', wx, wy, { image: c.dataUrl, title: 'Image' });
     refreshMedia(node); updateHead(node);
     addAsset('image', c.dataUrl, c.fileName || 'director shot');
     wx += 40; wy += 40;
@@ -2073,7 +2073,7 @@ function dropChatMediaOnCanvas(kind, src) {
   const cy = (rect.height / 2 - panY) / zoom - 90 + chatDropOffset;
   chatDropOffset = (chatDropOffset + 46) % 230;
   if (kind === 'image') {
-    addNode('upload', cx, cy, { image: src });
+    addNode('upload', cx, cy, { image: src, title: 'Image' });
   } else {
     const n = addNode('output', cx, cy);
     n.out.media = { kind: 'video', src };

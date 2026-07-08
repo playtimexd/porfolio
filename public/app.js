@@ -1911,8 +1911,8 @@ const CHAT_SYSTEM =
   `- When the user asks to generate, create, make, render or "put on the canvas" images (or a video), set kind to "images" (or "video") and put final, detailed generation prompts in shots (max 9) with consistent characters, style and lighting. PREFER generating over merely returning prompts — the app renders them straight onto the canvas. Do NOT ask to confirm unless the request is genuinely ambiguous.\n` +
   `- Use kind "prompts"/"script"/"storyboard" only when the user explicitly wants text to review rather than finished images.\n` +
   `- Otherwise set kind "none" with an empty shots array.\n` +
-  `- ASPECT RATIO: for every image/video shot include an "aspect" field chosen to fit the request — 9:16 for phone/story/reel/portrait, 16:9 or 21:9 for cinematic/banner/wallpaper/landscape, 4:3 or 3:4 for standard photo, 1:1 ONLY for square posts/avatars/icons. Supported: 21:9, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3, 9:16. Never default to 1:1 unless a square is actually wanted; when unsure prefer 16:9.\n` +
-  `Reply as JSON only: {"reply": "...", "deliverable": {"kind": "...", "title": "...", "shots": [{"prompt": "...", "caption": "...", "aspect": "16:9"}]}}. Keep replies concise and warm.`;
+  `- ASPECT RATIO: include an "aspect" field on each shot ONLY when the request implies a shape — 9:16 for phone/story/reel/portrait, 16:9 or 21:9 for cinematic/banner/wallpaper/landscape, 4:3 or 3:4 for standard photo, 1:1 for square posts/avatars/icons (supported: 21:9, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3, 9:16). If no particular shape is implied, set "aspect" to "auto" and let the model frame it naturally — do NOT impose a fixed default.\n` +
+  `Reply as JSON only: {"reply": "...", "deliverable": {"kind": "...", "title": "...", "shots": [{"prompt": "...", "caption": "...", "aspect": "auto"}]}}. Keep replies concise and warm.`;
 
 function chatModelSelect(kind, key) {
   const sel = el('select', { title: `${kind} model used by the chat agent` });
@@ -2132,8 +2132,8 @@ async function runChatGeneration(kind, shots, refImgs) {
       renderChat();
       const forced = chatCfg.aspect && chatCfg.aspect !== 'auto' ? chatCfg.aspect : null;
       const g = kind === 'video'
-        ? await api(model, { prompt: shots[i].prompt, duration: shots[i].duration || '5', ratio: forced || shots[i].aspect || shots[i].ratio || '16:9', image: refImgs?.[0] })
-        : await api(model, { prompt: shots[i].prompt, aspect: forced || shots[i].aspect || '16:9', images: refImgs?.length ? refImgs : undefined });
+        ? await api(model, { prompt: shots[i].prompt, duration: shots[i].duration || '5', ratio: forced || shots[i].aspect || shots[i].ratio || 'auto', image: refImgs?.[0] })
+        : await api(model, { prompt: shots[i].prompt, aspect: forced || shots[i].aspect || 'auto', images: refImgs?.length ? refImgs : undefined });
       const src = kind === 'video' ? g.video : g.image;
       msg.media.push({ kind, src, prompt: shots[i].prompt });
       addAsset(kind, src, shots[i].prompt);

@@ -308,7 +308,89 @@ video.lb-media { cursor: default; }
 }
 .lb-close { top: 18px; right: 18px; width: 38px; height: 38px; line-height: 1; }
 .lb-dl { bottom: 18px; right: 18px; padding: 9px 16px; text-decoration: none; }
+.lb-edit {
+  position: fixed; bottom: 18px; right: 140px; z-index: 301;
+  background: linear-gradient(135deg, var(--accent), #6448d6);
+  border: none; color: #fff; font-weight: 600;
+  padding: 9px 16px; border-radius: 9px; cursor: pointer; font-size: 14px;
+}
 .lb-close:hover, .lb-dl:hover { border-color: var(--accent); }
+.lb-edit:hover { transform: translateY(-1px); }
+
+/* ---------- Image editor ---------- */
+#img-editor {
+  position: fixed; inset: 0; z-index: 310;
+  display: flex; flex-direction: column;
+  background: #0d0d0f;
+}
+#img-editor[hidden] { display: none; }
+.ie-bar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.ie-title { font-weight: 700; font-size: 14px; }
+.ie-status { color: var(--accent-2); font-size: 12.5px; }
+#img-editor.busy .ie-status::after { content: ' ⏳'; }
+.ie-close { margin-left: auto; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); width: 34px; height: 34px; border-radius: 8px; cursor: pointer; }
+.ie-close:hover { border-color: var(--accent); }
+.ie-body { flex: 1; display: flex; min-height: 0; }
+.ie-rail {
+  width: 210px; flex-shrink: 0;
+  overflow-y: auto;
+  padding: 10px; background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.ie-grp { font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-dim); margin: 10px 2px 3px; }
+.ie-grp:first-child { margin-top: 0; }
+.ie-tool {
+  text-align: left; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 8px; cursor: pointer; font-size: 12.5px;
+}
+.ie-tool:hover { border-color: var(--accent); }
+.ie-stage {
+  flex: 1; position: relative; overflow: auto;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background:
+    repeating-conic-gradient(#1a1a1e 0% 25%, #141417 0% 50%) 50% / 22px 22px;
+}
+.ie-canvas { max-width: 100%; max-height: 78vh; object-fit: contain; box-shadow: 0 12px 50px rgba(0,0,0,.6); }
+#img-editor.busy .ie-canvas { opacity: .5; transition: opacity .2s; }
+.ie-crop {
+  position: absolute; border: 1.5px dashed var(--accent-2);
+  background: rgba(124,92,255,.15); pointer-events: none;
+}
+.ie-adjust {
+  position: absolute; right: 18px; top: 64px; z-index: 2;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px; display: flex; flex-direction: column; gap: 8px; width: 200px;
+}
+.ie-slider { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-dim); }
+.ie-slider input { width: 100%; }
+.ie-apply { background: linear-gradient(135deg, var(--accent), #6448d6); border: none; color: #fff; padding: 7px; border-radius: 7px; cursor: pointer; }
+.ie-prompt {
+  display: flex; gap: 8px; padding: 10px 14px;
+  background: var(--panel); border-top: 1px solid var(--border);
+}
+.ie-prompt input {
+  flex: 1; background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 9px; padding: 10px 12px; font-size: 13px;
+}
+.ie-prompt input:focus { border-color: var(--accent); outline: none; }
+.ie-go { background: linear-gradient(135deg, var(--accent), #6448d6); border: none; color: #fff; font-weight: 600; padding: 0 18px; border-radius: 9px; cursor: pointer; }
+.ie-foot {
+  display: flex; gap: 8px; padding: 10px 14px; background: var(--panel);
+  border-top: 1px solid var(--border); justify-content: flex-end;
+}
+.ie-foot button, .ie-foot a {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; text-decoration: none;
+}
+.ie-foot .primary { background: linear-gradient(135deg, var(--accent), #6448d6); border: none; color: #fff; font-weight: 600; }
+.ie-foot button:hover, .ie-foot a:hover { border-color: var(--accent); }
 
 .node-ta {
   width: 100%;

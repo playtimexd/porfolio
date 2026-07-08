@@ -482,6 +482,11 @@ function openLightbox(media) {
     content.addEventListener('click', (e) => { e.stopPropagation(); content.classList.toggle('zoomed'); });
   }
   box.appendChild(content);
+  if (media.kind === 'image') {
+    const edit = el('button', { class: 'lb-edit', title: 'Edit this image' }, '✎ Edit');
+    edit.addEventListener('click', (e) => { e.stopPropagation(); closeLightbox(); openImageEditor(media.src); });
+    box.appendChild(edit);
+  }
   const dl = el('a', { class: 'lb-dl', href: media.src, download: 'artcanvas-full.' + (media.kind === 'video' ? 'mp4' : 'png') }, '⬇ Download');
   if (!media.src.startsWith('data:')) dl.target = '_blank';
   dl.addEventListener('click', (e) => e.stopPropagation());
@@ -491,6 +496,285 @@ function openLightbox(media) {
 function closeLightbox() {
   const box = document.getElementById('lightbox');
   if (box) { box.hidden = true; box.innerHTML = ''; }
+}
+
+// =====================================================================
+// IMAGE EDITOR (Lovart-style) — AI edits via Nano Banana img2img + local canvas tools
+// =====================================================================
+let imgEditor = null;
+const loadImage = (src) => new Promise((res, rej) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = rej; i.src = src; });
+
+function editorImageModelId() {
+  if (chatCfg.imageModel && MODELS.some(m => m.id === chatCfg.imageModel && m.available)) return chatCfg.imageModel;
+  return MODELS.find(m => m.kind === 'image' && m.available)?.id || '';
+}
+
+function openImageEditor(src) {
+  buildImageEditor();
+  imgEditor.src = src;
+  imgEditor.history = [];
+  imgEditor.mode = null;
+  setEditorStatus('');
+  renderEditorImage();
+  imgEditor.overlay.hidden = false;
+}
+function closeImageEditor() { if (imgEditor) imgEditor.overlay.hidden = true; }
+
+function buildImageEditor() {
+  if (imgEditor?.overlay) return;
+  const overlay = el('div', { id: 'img-editor', hidden: '' });
+
+  const bar = el('div', { class: 'ie-bar' });
+  bar.appendChild(el('span', { class: 'ie-title' }, '✎ Image editor'));
+  const status = el('span', { class: 'ie-status' });
+  bar.appendChild(status);
+  const closeBtn = el('button', { class: 'ie-close', title: 'Close (Esc)' }, '✕');
+  closeBtn.addEventListener('click', closeImageEditor);
+  bar.appendChild(closeBtn);
+  overlay.appendChild(bar);
+
+  const body = el('div', { class: 'ie-body' });
+  // Tool rail
+  const rail = el('div', { class: 'ie-rail' });
+  const grp = (label) => { rail.appendChild(el('div', { class: 'ie-grp' }, label)); };
+  const tool = (label, fn) => { const b = el('button', { class: 'ie-tool' }, label); b.addEventListener('click', fn); rail.appendChild(b); return b; };
+
+  grp('AI edit (Nano Banana)');
+  tool('🪄 Quick edit', () => { imgEditor.promptEl.focus(); });
+  tool('🧩 Edit elements', () => setPrompt('Change the following element: '));
+  tool('🔤 Edit text', () => setPrompt('Replace the text in the image with: '));
+  tool('🖼 Mockup', () => setPrompt('Place this design as a realistic mockup on: '));
+  tool('↔ Expand / uncrop', () => aiEdit('Expand and outpaint the scene naturally on all sides, keeping the existing content centered and consistent.', {}));
+  tool('🧭 Multi-angle', () => multiAngle());
+  tool('✂ Remove background', () => aiEdit('Remove the background completely. Keep only the main subject, cleanly cut out on a plain white background.', {}));
+  tool('🔺 Vectorize', () => aiEdit('Redraw as a clean flat vector illustration: smooth shapes, solid colors, crisp edges, no photographic texture.', {}));
+  tool('⬆ Upscale 2K', () => aiEdit('Upscale to higher resolution. Enhance fine detail and sharpness. Do NOT change the content, colors or composition.', { quality: 'high' }));
+  tool('⬆ Upscale 4K', () => aiEdit('Upscale to maximum resolution. Enhance fine detail and sharpness. Do NOT change the content, colors or composition.', { quality: 'ultra' }));
+
+  grp('Adjust (local)');
+  tool('↺ Rotate left', () => transformCanvas(rotateFn(-1)));
+  tool('↻ Rotate right', () => transformCanvas(rotateFn(1)));
+  tool('⇋ Flip horizontal', () => transformCanvas(flipFn(true)));
+  tool('⇵ Flip vertical', () => transformCanvas(flipFn(false)));
+  tool('⛶ Crop', () => toggleCrop());
+  tool('🩹 Eraser', () => toggleErase());
+  tool('🎚 Adjust colors', () => toggleAdjust());
+  body.appendChild(rail);
+
+  // Stage
+  const stageWrap = el('div', { class: 'ie-stage' });
+  const canvas = el('canvas', { class: 'ie-canvas' });
+  stageWrap.appendChild(canvas);
+  const cropRect = el('div', { class: 'ie-crop', hidden: '' });
+  stageWrap.appendChild(cropRect);
+  body.appendChild(stageWrap);
+  overlay.appendChild(body);
+
+  // Adjust panel (hidden until toggled)
+  const adj = el('div', { class: 'ie-adjust', hidden: '' });
+  const mkSlider = (name, min, max, val) => {
+    const row = el('label', { class: 'ie-slider' });
+    row.appendChild(el('span', {}, name));
+    const s = el('input', { type: 'range', min, max, value: val });
+    row.appendChild(s);
+    adj.appendChild(row);
+    return s;
+  };
+  const sB = mkSlider('Brightness', '50', '150', '100');
+  const sC = mkSlider('Contrast', '50', '150', '100');
+  const sS = mkSlider('Saturation', '0', '200', '100');
+  const applyAdj = el('button', { class: 'ie-apply' }, 'Apply');
+  const previewAdj = () => { canvas.style.filter = `brightness(${sB.value}%) contrast(${sC.value}%) saturate(${sS.value}%)`; };
+  [sB, sC, sS].forEach(s => s.addEventListener('input', previewAdj));
+  applyAdj.addEventListener('click', async () => {
+    await transformCanvas((img) => {
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const x = c.getContext('2d');
+      x.filter = `brightness(${sB.value}%) contrast(${sC.value}%) saturate(${sS.value}%)`;
+      x.drawImage(img, 0, 0);
+      return c;
+    });
+    canvas.style.filter = ''; sB.value = sC.value = 100; sS.value = 100; adj.hidden = true;
+  });
+  adj.appendChild(applyAdj);
+  overlay.appendChild(adj);
+
+  // Prompt bar
+  const promptBar = el('form', { class: 'ie-prompt' });
+  const promptEl = el('input', { type: 'text', placeholder: 'Describe an edit — e.g. “make it night time”, “add a red hat”…' });
+  const go = el('button', { type: 'submit', class: 'ie-go' }, 'Apply edit');
+  promptBar.appendChild(promptEl); promptBar.appendChild(go);
+  promptBar.addEventListener('submit', (e) => { e.preventDefault(); const t = promptEl.value.trim(); if (t) aiEdit(t, {}); });
+  overlay.appendChild(promptBar);
+
+  // Footer actions
+  const foot = el('div', { class: 'ie-foot' });
+  const undo = el('button', {}, '↶ Undo');
+  undo.addEventListener('click', undoEditor);
+  const toCanvasBtn = el('button', { class: 'primary' }, '＋ Save to canvas');
+  toCanvasBtn.addEventListener('click', () => {
+    const r = viewport.getBoundingClientRect();
+    addNode('upload', (r.width / 2 - panX) / zoom - 130, (r.height / 2 - panY) / zoom - 90, { image: imgEditor.src });
+    addAsset('image', imgEditor.src, 'edited image');
+    toast('Edited image added to the canvas');
+  });
+  const dl = el('a', {}, '⬇ Download');
+  dl.addEventListener('click', () => { dl.href = imgEditor.src; dl.download = 'artcanvas-edited.png'; });
+  foot.appendChild(undo); foot.appendChild(toCanvasBtn); foot.appendChild(dl);
+  overlay.appendChild(foot);
+
+  document.body.appendChild(overlay);
+  imgEditor = { overlay, canvas, ctx: canvas.getContext('2d'), stageWrap, cropRect, statusEl: status, promptEl, adj, previewAdj, src: null, history: [], mode: null, busy: false };
+  wireCropAndErase();
+}
+
+function setPrompt(t) { imgEditor.promptEl.value = t; imgEditor.promptEl.focus(); imgEditor.promptEl.setSelectionRange(t.length, t.length); }
+function setEditorStatus(t, busy) { imgEditor.statusEl.textContent = t; imgEditor.overlay.classList.toggle('busy', !!busy); }
+function pushHistory() { if (imgEditor.src) imgEditor.history.push(imgEditor.src); if (imgEditor.history.length > 20) imgEditor.history.shift(); }
+function undoEditor() { if (!imgEditor.history.length) { toast('Nothing to undo'); return; } imgEditor.src = imgEditor.history.pop(); renderEditorImage(); }
+
+async function renderEditorImage() {
+  const img = await loadImage(imgEditor.src);
+  imgEditor.canvas.width = img.naturalWidth; imgEditor.canvas.height = img.naturalHeight;
+  imgEditor.ctx.clearRect(0, 0, img.naturalWidth, img.naturalHeight);
+  imgEditor.ctx.drawImage(img, 0, 0);
+}
+
+async function transformCanvas(fn) {
+  const img = await loadImage(imgEditor.src);
+  const c = fn(img);
+  pushHistory();
+  imgEditor.src = c.toDataURL('image/png');
+  renderEditorImage();
+}
+const rotateFn = (dir) => (img) => {
+  const c = document.createElement('canvas'); c.width = img.height; c.height = img.width;
+  const x = c.getContext('2d'); x.translate(c.width / 2, c.height / 2); x.rotate(dir * Math.PI / 2);
+  x.drawImage(img, -img.width / 2, -img.height / 2); return c;
+};
+const flipFn = (horiz) => (img) => {
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const x = c.getContext('2d'); x.translate(horiz ? c.width : 0, horiz ? 0 : c.height); x.scale(horiz ? -1 : 1, horiz ? 1 : -1);
+  x.drawImage(img, 0, 0); return c;
+};
+
+async function aiEdit(instruction, opts) {
+  if (imgEditor.busy) return;
+  const model = editorImageModelId();
+  if (!model) { toast('No image model available — add a key', 'error'); return; }
+  imgEditor.busy = true; setEditorStatus('Working… ' + instruction.slice(0, 40), true);
+  try {
+    const g = await api(model, { prompt: instruction, images: [imgEditor.src], quality: opts.quality || 'auto', aspect: opts.aspect || 'auto' });
+    if (!g.image) throw new Error('No image returned');
+    pushHistory();
+    imgEditor.src = g.image;
+    imgEditor.promptEl.value = '';
+    renderEditorImage();
+    setEditorStatus('Done ✓');
+  } catch (e) { setEditorStatus('⚠ ' + e.message); toast('Edit failed: ' + e.message, 'error'); }
+  imgEditor.busy = false;
+  imgEditor.overlay.classList.remove('busy');
+}
+
+async function multiAngle() {
+  if (imgEditor.busy) return;
+  const model = editorImageModelId();
+  if (!model) { toast('No image model available', 'error'); return; }
+  const angles = [
+    ['three-quarter left', 'Show the same subject from a three-quarter front-left angle, same style and lighting.'],
+    ['side profile', 'Show the same subject from a direct side profile, same style and lighting.'],
+    ['three-quarter right', 'Show the same subject from a three-quarter front-right angle, same style and lighting.'],
+    ['back view', 'Show the same subject from behind (back view), same style and lighting.'],
+  ];
+  const base = imgEditor.src;
+  imgEditor.busy = true;
+  let n = 0;
+  const r = viewport.getBoundingClientRect();
+  let ox = (r.width / 2 - panX) / zoom - 130, oy = (r.height / 2 - panY) / zoom - 90;
+  try {
+    for (const [name, prompt] of angles) {
+      setEditorStatus(`Generating ${++n}/4 — ${name}…`, true);
+      const g = await api(model, { prompt, images: [base], aspect: 'auto' });
+      if (g.image) { addNode('upload', ox, oy, { image: g.image }); addAsset('image', g.image, 'angle: ' + name); ox += 44; oy += 44; }
+    }
+    setEditorStatus('4 angles added to the canvas ✓');
+    toast('Multi-angle views added to the canvas');
+  } catch (e) { setEditorStatus('⚠ ' + e.message); }
+  imgEditor.busy = false; imgEditor.overlay.classList.remove('busy');
+}
+
+function toggleAdjust() { imgEditor.adj.hidden = !imgEditor.adj.hidden; if (imgEditor.adj.hidden) imgEditor.canvas.style.filter = ''; }
+
+// crop + eraser interactions on the stage canvas
+function toggleCrop() {
+  imgEditor.mode = imgEditor.mode === 'crop' ? null : 'crop';
+  imgEditor.cropRect.hidden = true;
+  imgEditor.canvas.style.cursor = imgEditor.mode === 'crop' ? 'crosshair' : '';
+  setEditorStatus(imgEditor.mode === 'crop' ? 'Crop: drag a box, then release to apply' : '');
+}
+function toggleErase() {
+  imgEditor.mode = imgEditor.mode === 'erase' ? null : 'erase';
+  imgEditor.canvas.style.cursor = imgEditor.mode === 'erase' ? 'cell' : '';
+  setEditorStatus(imgEditor.mode === 'erase' ? 'Eraser: drag over the image to erase to transparent' : '');
+}
+function canvasCoords(ev) {
+  const rect = imgEditor.canvas.getBoundingClientRect();
+  return {
+    x: (ev.clientX - rect.left) / rect.width * imgEditor.canvas.width,
+    y: (ev.clientY - rect.top) / rect.height * imgEditor.canvas.height,
+    scale: imgEditor.canvas.width / rect.width,
+  };
+}
+function wireCropAndErase() {
+  const cv = imgEditor.canvas;
+  let start = null, erased = false;
+  cv.addEventListener('pointerdown', (e) => {
+    if (imgEditor.mode === 'crop') {
+      start = canvasCoords(e);
+      const rect = cv.getBoundingClientRect();
+      imgEditor.cropRect.hidden = false;
+      imgEditor._cropStartClient = { x: e.clientX, y: e.clientY, rect };
+      Object.assign(imgEditor.cropRect.style, { left: (e.clientX - rect.left) + 'px', top: (e.clientY - rect.top) + 'px', width: '0px', height: '0px' });
+      cv.setPointerCapture(e.pointerId);
+    } else if (imgEditor.mode === 'erase') {
+      pushHistory(); erased = false;
+      cv.setPointerCapture(e.pointerId);
+      eraseAt(e); erased = true;
+    }
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (imgEditor.mode === 'crop' && start && imgEditor._cropStartClient) {
+      const s = imgEditor._cropStartClient;
+      const x = Math.min(e.clientX, s.x) - s.rect.left, y = Math.min(e.clientY, s.y) - s.rect.top;
+      Object.assign(imgEditor.cropRect.style, { left: x + 'px', top: y + 'px', width: Math.abs(e.clientX - s.x) + 'px', height: Math.abs(e.clientY - s.y) + 'px' });
+    } else if (imgEditor.mode === 'erase' && e.buttons) {
+      eraseAt(e);
+    }
+  });
+  cv.addEventListener('pointerup', (e) => {
+    if (imgEditor.mode === 'crop' && start) {
+      const end = canvasCoords(e);
+      const x = Math.min(start.x, end.x), y = Math.min(start.y, end.y);
+      const w = Math.abs(end.x - start.x), h = Math.abs(end.y - start.y);
+      start = null; imgEditor.cropRect.hidden = true;
+      if (w > 6 && h > 6) applyCrop(x, y, w, h);
+      imgEditor.mode = null; cv.style.cursor = ''; setEditorStatus('');
+    } else if (imgEditor.mode === 'erase' && erased) {
+      imgEditor.src = cv.toDataURL('image/png');
+    }
+  });
+}
+function eraseAt(e) {
+  const c = canvasCoords(e);
+  const x = imgEditor.ctx;
+  x.save(); x.globalCompositeOperation = 'destination-out';
+  x.beginPath(); x.arc(c.x, c.y, 18 * c.scale, 0, Math.PI * 2); x.fill(); x.restore();
+}
+async function applyCrop(x, y, w, h) {
+  const img = await loadImage(imgEditor.src);
+  const c = document.createElement('canvas'); c.width = Math.round(w); c.height = Math.round(h);
+  c.getContext('2d').drawImage(img, x, y, w, h, 0, 0, w, h);
+  pushHistory(); imgEditor.src = c.toDataURL('image/png'); renderEditorImage();
 }
 
 // remembered model choices (per kind + tier context) so a pick sticks everywhere
@@ -781,7 +1065,8 @@ document.addEventListener('keydown', (e) => {
     const ch = document.getElementById('chat');
     const as = document.getElementById('assets');
     const lb = document.getElementById('lightbox');
-    if (lb && !lb.hidden) closeLightbox();
+    if (imgEditor && !imgEditor.overlay.hidden) closeImageEditor();
+    else if (lb && !lb.hidden) closeLightbox();
     else if (directorOverlay && !directorOverlay.hidden) closeDirector();
     else if (!ctx.hidden) ctx.hidden = true;
     else if (!qa.hidden) qa.hidden = true;

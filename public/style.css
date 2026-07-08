@@ -52,14 +52,17 @@ button:disabled { opacity: .5; cursor: default; }
 #topbar {
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: 50px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
+  padding: 0 16px;
   z-index: 50;
   pointer-events: none;
 }
+#topbar button { font-size: 13.5px; padding: 9px 15px; }
+#topbar .icon-btn { width: 34px; padding: 7px 0; font-size: 16px; }
+#topbar #zoom-label { font-size: 13px; }
 .tb-group {
   display: flex; align-items: center; gap: 8px;
   background: var(--panel);
@@ -524,7 +527,7 @@ video.lb-media { cursor: default; }
 /* ---------- Properties panel ---------- */
 #props {
   position: fixed;
-  top: 62px; right: 14px; bottom: 76px;
+  top: 72px; right: 14px; bottom: 76px;
   width: 272px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -823,7 +826,7 @@ button.danger:hover { background: rgba(229,72,77,.15); }
 #chat[hidden] { display: none; }
 #chat {
   position: fixed;
-  top: 62px; right: 14px; bottom: 76px;
+  top: 72px; right: 14px; bottom: 76px;
   width: 340px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -1026,7 +1029,7 @@ button.danger:hover { background: rgba(229,72,77,.15); }
 /* ---------- Assets panel ---------- */
 #assets {
   position: fixed;
-  top: 62px; left: 14px; bottom: 76px;
+  top: 72px; left: 14px; bottom: 76px;
   width: 250px;
   background: var(--panel);
   border: 1px solid var(--border);

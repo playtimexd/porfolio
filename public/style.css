@@ -208,6 +208,34 @@ button:disabled { opacity: .5; cursor: default; }
   cursor: text;
 }
 
+/* 3D Director node — embeds the Director Desk viewport */
+.node[data-type="threeDirector"] { width: 560px; }
+.director-body { display: flex; flex-direction: column; }
+.director-frame {
+  display: block;
+  width: 100%;
+  height: 380px;
+  border: 0;
+  background: #090909;
+}
+.director-capture {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 9px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.director-capture.empty { justify-content: center; text-align: center; }
+.director-capture img {
+  width: 72px !important;
+  height: 46px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+.director-cap-tag { color: #7cf0c8; font-weight: 600; }
+
 .node-ta {
   width: 100%;
   min-height: 84px;

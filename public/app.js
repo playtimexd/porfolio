@@ -246,6 +246,55 @@ const NODE_TYPES = {
     },
   },
 
+  threeDirector: {
+    title: '3D Director', color: '#7cf0c8', desc: 'block a shot → image',
+    inputs: [{ name: 'backdrop', type: 'image', optional: true }],
+    outputs: [{ name: 'image', type: 'image' }],
+    defaults: () => ({ capture: null }),
+    sub: (n) => n.data.capture ? 'shot captured' : 'block your scene',
+    media(node) {
+      const wrap = el('div', { class: 'director-body' });
+      // Keep one persistent iframe per node so posing state survives re-renders.
+      if (!node._frame) {
+        node._frame = el('iframe', {
+          class: 'director-frame',
+          src: `/director/index.html?instanceId=${encodeURIComponent('acv-' + node.id)}&theme=dark`,
+          allow: 'fullscreen; xr-spatial-tracking',
+        });
+      }
+      wrap.appendChild(node._frame);
+      const cap = el('div', { class: 'director-capture' });
+      node._cap = cap;
+      wrap.appendChild(cap);
+      renderDirectorCapture(node);
+      return wrap;
+    },
+    props(node, box) {
+      box.appendChild(el('div', { class: 'mini-hint' },
+        'Pose characters and frame the camera in the viewport, then Capture and “Send to canvas”. ' +
+        'The shot lands here as this node’s image output — wire it into an Image or Video model as a reference / first frame.'));
+      const bg = el('button', {}, '⬗ Push connected image as backdrop');
+      bg.addEventListener('click', () => pushDirectorBackdrop(node));
+      box.appendChild(bg);
+      box.appendChild(el('div', { class: 'mini-hint' }, 'Runs the connected backdrop input and drops it into the 3D scene as a background.'));
+      if (node.data.capture) {
+        const clear = el('button', {}, '✕ Clear captured shot');
+        clear.addEventListener('click', () => {
+          node.data.capture = null; node.out.media = null;
+          renderDirectorCapture(node); updateHead(node); save();
+        });
+        box.appendChild(clear);
+      }
+    },
+    async exec(node, inputs) {
+      const bg = v(inputs.backdrop);
+      if (bg) postToDirector(node, { type: 'storyai:director-desk-panorama', payload: { imageUrl: bg, fileName: 'backdrop.png' } });
+      if (!node.data.capture) throw new Error('No shot captured yet — capture a shot in the 3D Director and click “Send to canvas”.');
+      node.out.media = { kind: 'image', src: node.data.capture };
+      return { image: { type: 'image', value: node.data.capture } };
+    },
+  },
+
   agent: {
     title: 'Agent', color: '#f0c542', desc: 'brief → shot series',
     inputs: [{ name: 'brief', type: 'text' }, { name: 'reference', type: 'image', optional: true, multi: 9 }],
@@ -564,7 +613,7 @@ function addNode(type, x, y, data, id) {
     data: { ...def.defaults(), ...(data || {}) },
     out: {},
   };
-  const div = el('div', { class: 'node', 'data-id': node.id });
+  const div = el('div', { class: 'node', 'data-id': node.id, 'data-type': type });
   div.style.left = x + 'px';
   div.style.top = y + 'px';
 
@@ -901,6 +950,60 @@ function toast(msg, type = 'info') {
   box.appendChild(t);
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 350); }, 2400);
 }
+
+// 3D Director bridge --------------------------------------------------------
+function postToDirector(node, msg) {
+  try { node._frame?.contentWindow?.postMessage(msg, location.origin); } catch { /* iframe not ready */ }
+}
+
+function renderDirectorCapture(node) {
+  const cap = node._cap;
+  if (!cap) return;
+  cap.innerHTML = '';
+  if (node.data.capture) {
+    cap.classList.remove('empty');
+    cap.appendChild(el('img', { src: node.data.capture, alt: 'captured shot' }));
+    cap.appendChild(el('span', { class: 'director-cap-tag' }, '✓ captured → image output'));
+  } else {
+    cap.classList.add('empty');
+    cap.appendChild(el('span', {}, 'No shot captured yet — Capture in the viewport, then “Send to canvas”.'));
+  }
+}
+
+async function pushDirectorBackdrop(node) {
+  const inEdge = edges.find(e => e.to.node === node.id && e.to.port === 'backdrop');
+  if (!inEdge) { toast('Connect an image to the backdrop input first'); return; }
+  try {
+    const up = await execNode(inEdge.from.node, { results: new Map(), pending: new Set() });
+    const img = up?.[inEdge.from.port]?.value;
+    if (!img) { toast('The connected node produced no image', 'error'); return; }
+    postToDirector(node, { type: 'storyai:director-desk-panorama', payload: { imageUrl: img, fileName: 'backdrop.png' } });
+    toast('Backdrop sent into the 3D scene');
+  } catch (e) { toast('Backdrop failed: ' + e.message, 'error'); }
+}
+
+// Receive captured shots pushed from any embedded Director iframe.
+window.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || typeof d !== 'object' || d.type !== 'storyai:director-desk-captures-sent') return;
+  const caps = d.payload?.captures || [];
+  if (!caps.length) return;
+  let target = null;
+  for (const n of nodes.values()) {
+    if (n.type === 'threeDirector' && n._frame && n._frame.contentWindow === e.source) { target = n; break; }
+  }
+  if (!target) return;
+  const dataUrl = caps[0].dataUrl;
+  if (!dataUrl) return;
+  target.data.capture = dataUrl;
+  target.out.media = { kind: 'image', src: dataUrl };
+  renderDirectorCapture(target);
+  updateHead(target);
+  addAsset('image', dataUrl, 'director shot');
+  if (selected?.kind === 'node' && selected.id === target.id) renderProps(target);
+  save();
+  toast(caps.length > 1 ? `Captured ${caps.length} shots — using the first as output` : 'Shot captured → image output ready');
+});
 
 let running = false;
 async function runGraph(targetIds) {

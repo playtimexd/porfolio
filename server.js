@@ -42,7 +42,9 @@ const MODELS = [
   // Google Gemini
   { id: 'gemini-2.5-pro',                       label: 'Gemini Pro',          provider: 'gemini',   kind: 'llm', tier: 'smart' },
   { id: process.env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash', label: 'Gemini Flash', provider: 'gemini', kind: 'llm', tier: 'fast' },
-  { id: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image', label: 'Gemini Image (Nano Banana)', provider: 'gemini', kind: 'image' },
+  { id: 'gemini-2.5-flash-lite',                label: 'Gemini Flash Lite',   provider: 'gemini',   kind: 'llm', tier: 'fast' },
+  { id: process.env.GEMINI_IMAGE_MODEL || 'gemini-3-pro-image', label: 'Nano Banana Pro', provider: 'gemini', kind: 'image' },
+  { id: 'gemini-3.1-flash-image',               label: 'Nano Banana 2',       provider: 'gemini',   kind: 'image' },
   // Seedance via BytePlus ModelArk — set SEEDANCE_MODEL to the exact id from your console
   { id: process.env.SEEDANCE_MODEL || 'seedance-2-0', label: 'Seedance', provider: 'seedance', kind: 'video' },
   // Meshy — text-to-3D / image-to-3D
@@ -496,7 +498,14 @@ async function run(modelId, inputs) {
 }
 
 // ---- HTTP server ----
-const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const MIME = {
+  '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.ico': 'image/x-icon',
+  '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.bin': 'application/octet-stream',
+  '.wasm': 'application/wasm', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+  '.fbx': 'application/octet-stream', '.obj': 'text/plain', '.map': 'application/json',
+};
 const jobs = new Map(); // jobId -> {status, result, error, at}
 let jobSeq = 1;
 

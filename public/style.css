@@ -602,6 +602,21 @@ video.lb-media { cursor: default; }
 }
 .ref-add { width: 100%; }
 
+/* on-node "+ Add reference" button (Image/Video node body) */
+.node-refbtn {
+  display: block;
+  margin: 0 8px 8px;
+  width: calc(100% - 16px);
+  padding: 7px;
+  font-size: 11.5px;
+  background: var(--panel-2);
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.node-refbtn:hover { border-color: var(--accent); color: var(--text); }
+
 /* ---------- Minimap ---------- */
 #minimap {
   position: fixed;

@@ -80,6 +80,7 @@ const NODE_TYPES = {
       if (node.out.media) return mediaEl(node.out.media);
       return el('div', { class: 'placeholder' }, 'No image yet — connect a prompt and run');
     },
+    footer: (node) => refButton(node),
     props(node, box) {
       normRatio(node, 'aspect');
       box.appendChild(el('label', {}, 'Model'));
@@ -121,6 +122,7 @@ const NODE_TYPES = {
       if (node.out.media) return mediaEl(node.out.media);
       return el('div', { class: 'placeholder' }, 'No video yet — generation can take minutes');
     },
+    footer: (node) => refButton(node),
     props(node, box) {
       box.appendChild(el('label', {}, 'Model'));
       box.appendChild(modelSelect(node, 'video'));
@@ -638,15 +640,14 @@ function actionRow(node, box) {
 // Reference uploader for Image/Video node props.
 // Each chosen image becomes an Upload node on the canvas, auto-wired into
 // this node's image input — so references live on the canvas, not hidden here.
-function refControl(node, box) {
-  box.appendChild(el('label', {}, 'Reference images (up to 9)'));
-  const add = el('button', { class: 'ref-add' }, '＋ Add reference image');
+// Open a picker; each chosen image becomes a separate Upload node placed
+// below the target, staggered, and wired into its image input (max 9).
+function pickReferences(node) {
   const input = el('input', { type: 'file', accept: 'image/*', multiple: '', hidden: '' });
-  add.addEventListener('click', () => input.click());
+  document.body.appendChild(input);
   input.addEventListener('change', () => {
     const files = [...input.files];
-    input.value = '';
-    // reference nodes sit BELOW the target node, staggered left→right
+    input.remove();
     const already = edges.filter(e => e.to.node === node.id && e.to.port === 'image').length;
     const belowY = node.y + (node.el?.offsetHeight || 220) + 40;
     const startX = node.x - 285; // start a bit left so the row centers under the node
@@ -662,9 +663,22 @@ function refControl(node, box) {
       fr.readAsDataURL(f);
     }
   });
+  input.click();
+}
+
+// The "＋ Add reference" button that lives at the bottom of Image/Video nodes.
+function refButton(node) {
+  const b = el('button', { class: 'node-refbtn', title: 'Add a reference image (wired in below)' }, '＋ Add reference');
+  b.addEventListener('click', (e) => { e.stopPropagation(); pickReferences(node); });
+  return b;
+}
+
+function refControl(node, box) {
+  box.appendChild(el('label', {}, 'Reference images (up to 9)'));
+  const add = el('button', { class: 'ref-add' }, '＋ Add reference image');
+  add.addEventListener('click', () => pickReferences(node));
   box.appendChild(add);
-  box.appendChild(input);
-  box.appendChild(el('div', { class: 'mini-hint' }, 'Each reference becomes an image node below, wired into this node’s image input (max 9). You can also drag-wire your own image nodes in.'));
+  box.appendChild(el('div', { class: 'mini-hint' }, 'Each reference becomes a separate image node below, wired into this node’s image input (max 9). You can also drag-wire your own image nodes in.'));
 }
 
 function downloadNode(node) {
@@ -761,6 +775,7 @@ function addNode(type, x, y, data, id) {
   div.appendChild(right);
 
   div.appendChild(el('div', { class: 'node-media' }));
+  if (def.footer) div.appendChild(def.footer(node));
   div.appendChild(el('div', { class: 'node-status' }));
 
   const rz = el('div', { class: 'node-resize', title: 'Drag to resize width' });

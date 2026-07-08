@@ -1837,6 +1837,8 @@ document.getElementById('btn-new-project').addEventListener('click', () => {
   const name = prompt('Project name:', 'Untitled project');
   if (name !== null) createProject(name.trim() || 'Untitled project');
 });
+document.getElementById('hint-templates').addEventListener('click', () => document.getElementById('btn-templates').click());
+document.getElementById('hint-chat').addEventListener('click', () => document.getElementById('btn-chat').click());
 document.getElementById('btn-rename-project').addEventListener('click', () => {
   const meta = projects.list.find(p => p.id === projects.current);
   if (!meta) return;

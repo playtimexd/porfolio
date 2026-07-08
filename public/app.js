@@ -1587,7 +1587,7 @@ document.getElementById('btn-skills').addEventListener('click', () => {
   const render = () => {
     body.innerHTML = '';
     body.appendChild(el('div', { class: 'modal-hint' },
-      'A skill is a named block of instructions (style guides, brand rules, techniques). Attach skills to LLM and Agent nodes in their properties panel — they are injected as system instructions for the orchestrator and every sub-agent.'));
+      'A skill is a named block of instructions (style guides, brand rules, techniques). Toggle skills on in the Agent Chat (the “Skills:” chips) — active skills are injected as system instructions the agent follows.'));
     for (const s of SKILLS) {
       const row = el('div', { class: 'skill-row' });
       const head = el('div', { class: 'skill-head' });
@@ -1912,7 +1912,8 @@ document.getElementById('assets-close').addEventListener('click', () => { assets
 // Agent chat --------------------------------------------------------------
 let chatHistory = [];
 let chatBusy = false;
-const chatCfg = { model: '', imageModel: '', videoModel: '', aspect: '' };
+const chatCfg = { model: '', imageModel: '', videoModel: '', aspect: '', skills: [] };
+try { chatCfg.skills = JSON.parse(PREFS['chat:skills'] || '[]'); } catch { chatCfg.skills = []; }
 const chatPanel = document.getElementById('chat');
 const chatMsgs = document.getElementById('chat-msgs');
 const chatInput = document.getElementById('chat-input');
@@ -2004,6 +2005,35 @@ function buildChatCfg() {
   cfg.appendChild(chatModelSelect('image', 'imageModel'));
   cfg.appendChild(chatModelSelect('video', 'videoModel'));
   cfg.appendChild(chatAspectSelect());
+  buildChatSkills(cfg);
+}
+
+// toggle chips for skills the agent should follow (injected as system instructions)
+function buildChatSkills(cfg) {
+  chatCfg.skills = (chatCfg.skills || []).filter(id => SKILLS.some(s => s.id === id));
+  if (!SKILLS.length) return;
+  const row = el('div', { class: 'chat-skills' });
+  row.appendChild(el('span', { class: 'chat-skills-lbl' }, 'Skills:'));
+  for (const s of SKILLS) {
+    const on = chatCfg.skills.includes(s.id);
+    const chip = el('button', { class: 'skill-chip' + (on ? ' on' : ''), title: s.text ? s.text.slice(0, 200) : 'No instructions yet' }, s.name || 'Untitled');
+    chip.addEventListener('click', () => {
+      chatCfg.skills = chatCfg.skills.includes(s.id) ? chatCfg.skills.filter(x => x !== s.id) : [...chatCfg.skills, s.id];
+      setPref('chat:skills', JSON.stringify(chatCfg.skills));
+      chip.classList.toggle('on');
+    });
+    row.appendChild(chip);
+  }
+  cfg.appendChild(row);
+}
+
+function chatSystemPrompt() {
+  const skillText = (chatCfg.skills || [])
+    .map(id => SKILLS.find(s => s.id === id))
+    .filter(s => s && s.text && s.text.trim())
+    .map(s => `# Skill: ${s.name}\n${s.text.trim()}`)
+    .join('\n\n');
+  return skillText ? `${CHAT_SYSTEM}\n\nFollow these active skills:\n${skillText}` : CHAT_SYSTEM;
 }
 
 // Lovart-style quick-start chips shown when the chat is empty
@@ -2136,7 +2166,7 @@ async function sendChat(text) {
       .slice(-12)
       .map(m => `${m.role === 'user' ? 'User' : 'Agent'}: ${m.text.length > 600 ? m.text.slice(0, 600) + '…' : m.text}${m.deliverable?.shots?.length ? `\n[delivered ${m.deliverable.kind}: ${m.deliverable.title}]` : ''}`)
       .join('\n');
-    const r = await api(chatCfg.model, { prompt: transcript + '\nAgent:', system: CHAT_SYSTEM, format: 'chat', maxTokens: 4000, images: refImgs.length ? refImgs : undefined });
+    const r = await api(chatCfg.model, { prompt: transcript + '\nAgent:', system: chatSystemPrompt(), format: 'chat', maxTokens: 4000, images: refImgs.length ? refImgs : undefined });
     let parsed;
     try { parsed = JSON.parse(r.text); } catch {
       const m = r.text.match(/\{[\s\S]*\}/);

@@ -912,6 +912,14 @@ button.danger:hover { background: rgba(229,72,77,.15); }
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
+.chat-skills { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding-top: 2px; }
+.chat-skills-lbl { font-size: 11px; color: var(--text-dim); }
+.skill-chip {
+  font-size: 11px; padding: 3px 9px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim); cursor: pointer;
+  max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.skill-chip.on { background: rgba(124,92,255,.18); border-color: var(--accent); color: var(--accent-2); }
 #chat-cfg select {
   flex: 1 1 calc(50% - 3px);
   min-width: 0;

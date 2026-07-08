@@ -449,7 +449,48 @@ function mediaEl(media) {
     m = el('img', { src: media.src });
     m.addEventListener('load', () => { redrawEdges(); drawMinimap(); });
   }
+  // Wrap images & videos with an expand button that opens the full-size lightbox.
+  if (media.kind === 'image' || media.kind === 'video') {
+    const wrap = el('div', { class: 'media-wrap' });
+    wrap.appendChild(m);
+    const exp = el('button', { class: 'media-expand', title: 'Expand — view full size' }, '⤢');
+    exp.addEventListener('pointerdown', (e) => e.stopPropagation());
+    exp.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(media); });
+    wrap.appendChild(exp);
+    return wrap;
+  }
   return m;
+}
+
+// Full-size media viewer (lightbox) -----------------------------------------
+function openLightbox(media) {
+  let box = document.getElementById('lightbox');
+  if (!box) {
+    box = el('div', { id: 'lightbox' });
+    box.addEventListener('click', (e) => { if (e.target === box) closeLightbox(); });
+    document.body.appendChild(box);
+  }
+  box.innerHTML = '';
+  const close = el('button', { class: 'lb-close', title: 'Close (Esc)' }, '✕');
+  close.addEventListener('click', closeLightbox);
+  box.appendChild(close);
+  let content;
+  if (media.kind === 'video') {
+    content = el('video', { class: 'lb-media', src: media.src, controls: '', loop: '', autoplay: '' });
+  } else {
+    content = el('img', { class: 'lb-media', src: media.src, title: 'Click to toggle actual size' });
+    content.addEventListener('click', (e) => { e.stopPropagation(); content.classList.toggle('zoomed'); });
+  }
+  box.appendChild(content);
+  const dl = el('a', { class: 'lb-dl', href: media.src, download: 'artcanvas-full.' + (media.kind === 'video' ? 'mp4' : 'png') }, '⬇ Download');
+  if (!media.src.startsWith('data:')) dl.target = '_blank';
+  dl.addEventListener('click', (e) => e.stopPropagation());
+  box.appendChild(dl);
+  box.hidden = false;
+}
+function closeLightbox() {
+  const box = document.getElementById('lightbox');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
 }
 
 // remembered model choices (per kind + tier context) so a pick sticks everywhere
@@ -713,7 +754,9 @@ document.addEventListener('keydown', (e) => {
     const ov = document.getElementById('overlay');
     const ch = document.getElementById('chat');
     const as = document.getElementById('assets');
-    if (directorOverlay && !directorOverlay.hidden) closeDirector();
+    const lb = document.getElementById('lightbox');
+    if (lb && !lb.hidden) closeLightbox();
+    else if (directorOverlay && !directorOverlay.hidden) closeDirector();
     else if (!ctx.hidden) ctx.hidden = true;
     else if (!qa.hidden) qa.hidden = true;
     else if (!ov.hidden) ov.hidden = true;
@@ -1598,9 +1641,10 @@ function renderAssets() {
     } else {
       m = el('img', { src: a2.src, title: a2.label });
     }
+    m.title = (a2.label || '') + (a2.kind === 'model' ? '' : ' — click to view full size');
     m.addEventListener('click', () => {
-      const ext = a2.kind === 'video' ? 'mp4' : a2.kind === 'model' ? 'glb' : 'png';
-      const link2 = el('a', { href: a2.src, download: `artcanvas-asset-${assets.length - idx}.${ext}` });
+      if (a2.kind === 'image' || a2.kind === 'video') { openLightbox({ kind: a2.kind, src: a2.src }); return; }
+      const link2 = el('a', { href: a2.src, download: `artcanvas-asset-${assets.length - idx}.glb` });
       if (!a2.src.startsWith('data:')) link2.target = '_blank';
       link2.click();
     });

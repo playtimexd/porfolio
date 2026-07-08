@@ -127,6 +127,97 @@ const store = useCloud ? {
   },
 };
 
+// =====================================================================
+// AUTH & ACCOUNTS — infra-agnostic. Dev login works now; Azure AD (OIDC)
+// activates when AUTH_MODE=azure + the AZURE_* env vars are set. Sessions are
+// stateless HMAC-signed cookies; accounts + usage live in the `store` adapter.
+// =====================================================================
+const crypto = require('crypto');
+const AUTH_MODE = (process.env.AUTH_MODE || 'dev').toLowerCase(); // 'dev' | 'azure'
+const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 days (ms)
+const DEFAULT_CREDITS = Number(process.env.DEFAULT_CREDITS || 500);
+const CREDIT_COST = { image: 1, video: 5, threed: 3, llm: 0 }; // credits per generation kind
+
+// signing secret — from env, else persisted in DATA_DIR so dev logins survive restarts
+let SERVER_SECRET = process.env.SERVER_SECRET || '';
+if (!SERVER_SECRET) {
+  try {
+    const sp = path.join(DATA_DIR, '.secret');
+    if (fs.existsSync(sp)) SERVER_SECRET = fs.readFileSync(sp, 'utf8');
+    else { SERVER_SECRET = crypto.randomBytes(32).toString('hex'); fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(sp, SERVER_SECRET); }
+  } catch { SERVER_SECRET = crypto.randomBytes(32).toString('hex'); }
+}
+const b64u = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s) => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString();
+const hmac = (s) => crypto.createHmac('sha256', SERVER_SECRET).update(s).digest('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function signSession(uid) { const p = b64u(JSON.stringify({ uid, exp: Date.now() + SESSION_TTL })); return p + '.' + hmac(p); }
+function verifySession(token) {
+  if (!token || !token.includes('.')) return null;
+  const [p, sig] = token.split('.');
+  if (sig !== hmac(p)) return null;
+  try { const d = JSON.parse(unb64u(p)); return (d.exp && d.exp > Date.now()) ? d.uid : null; } catch { return null; }
+}
+function parseCookies(req) {
+  const out = {}; const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) { const i = part.indexOf('='); if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); }
+  return out;
+}
+function setSessionCookie(res, token) { res.setHeader('Set-Cookie', `nova_session=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${SESSION_TTL / 1000}; SameSite=Lax`); }
+function clearSessionCookie(res) { res.setHeader('Set-Cookie', 'nova_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); }
+
+async function getAccounts() { return (await store.get('accounts')) || { users: {}, byEmail: {} }; }
+async function saveAccounts(a) { await store.put('accounts', a); }
+async function getUser(uid) { return uid ? (await getAccounts()).users[uid] || null : null; }
+async function findOrCreateUser({ email, name, role }) {
+  const a = await getAccounts();
+  email = (email || '').toLowerCase().trim();
+  if (a.byEmail[email] && a.users[a.byEmail[email]]) {
+    const u = a.users[a.byEmail[email]];
+    if (name && !u.name) { u.name = name; await saveAccounts(a); }
+    return u;
+  }
+  const uid = 'u' + crypto.randomBytes(6).toString('hex');
+  const isFirst = Object.keys(a.users).length === 0;
+  a.users[uid] = { id: uid, email, name: name || email.split('@')[0] || 'User', role: role || (isFirst ? 'admin' : 'member'), credits: DEFAULT_CREDITS, used: 0, createdAt: Date.now() };
+  a.byEmail[email] = uid;
+  await saveAccounts(a);
+  return a.users[uid];
+}
+async function currentUser(req) { return getUser(verifySession(parseCookies(req).nova_session)); }
+const publicUser = (u) => u && { id: u.id, email: u.email, name: u.name, role: u.role, credits: u.credits, used: u.used, settings: u.settings || {} };
+async function recordUsage(uid, kind, modelId) {
+  const a = await getAccounts(); const u = a.users[uid]; if (!u) return;
+  const cost = CREDIT_COST[kind] ?? 1;
+  u.used = (u.used || 0) + cost;
+  u.credits = Math.max(0, (u.credits || 0) - cost);
+  u.lastActive = Date.now();
+  u.usageLog = (u.usageLog || []).slice(-49);
+  u.usageLog.push({ at: Date.now(), kind, model: modelId, cost });
+  await saveAccounts(a);
+}
+
+// ---- Azure AD (OIDC authorization-code flow) — used when AUTH_MODE=azure ----
+const AZURE = {
+  tenant: process.env.AZURE_TENANT || '',
+  clientId: process.env.AZURE_CLIENT_ID || '',
+  clientSecret: process.env.AZURE_CLIENT_SECRET || '',
+  redirect: process.env.AZURE_REDIRECT || '',
+  adminGroup: process.env.AZURE_ADMIN_GROUP || '',
+};
+function azureAuthorizeUrl(state) {
+  const p = new URLSearchParams({ client_id: AZURE.clientId, response_type: 'code', redirect_uri: AZURE.redirect, response_mode: 'query', scope: 'openid profile email', state });
+  return `https://login.microsoftonline.com/${AZURE.tenant}/oauth2/v2.0/authorize?${p}`;
+}
+async function azureExchange(code) {
+  const body = new URLSearchParams({ client_id: AZURE.clientId, client_secret: AZURE.clientSecret, code, redirect_uri: AZURE.redirect, grant_type: 'authorization_code', scope: 'openid profile email' });
+  const r = await fetch(`https://login.microsoftonline.com/${AZURE.tenant}/oauth2/v2.0/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+  const data = await r.json();
+  if (!data.id_token) throw apiError('Azure token exchange failed', 401);
+  // TODO(prod): validate id_token signature against the tenant JWKS before trusting claims
+  const claims = JSON.parse(unb64u(data.id_token.split('.')[1]));
+  return { email: claims.email || claims.preferred_username || claims.upn, name: claims.name };
+}
+
 // aspect-ratio helpers — accepts "16:9" style plus legacy square/landscape/portrait
 const LEGACY_RATIOS = { square: '1:1', landscape: '3:2', portrait: '2:3' };
 function parseRatio(aspect) {
@@ -525,18 +616,72 @@ function json(res, status, obj) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    const urlPath = req.url.split('?')[0];
+    const uid = verifySession(parseCookies(req).nova_session);
+
+    // ---- auth routes (always accessible) ----
+    if (urlPath === '/api/auth/me') return json(res, 200, { user: publicUser(await getUser(uid)), authMode: AUTH_MODE });
+    if (urlPath === '/api/auth/logout') { clearSessionCookie(res); return json(res, 200, { ok: true }); }
+    if (urlPath === '/api/auth/settings' && req.method === 'POST') {
+      if (!uid) return json(res, 401, { error: 'Not signed in' });
+      const { name, settings } = await readBody(req);
+      const a = await getAccounts(); const u = a.users[uid];
+      if (!u) return json(res, 401, { error: 'Not signed in' });
+      if (typeof name === 'string' && name.trim()) u.name = name.trim().slice(0, 60);
+      if (settings && typeof settings === 'object') u.settings = { ...(u.settings || {}), ...settings };
+      await saveAccounts(a);
+      return json(res, 200, { user: publicUser(u) });
+    }
+    if (urlPath === '/api/auth/login' && req.method === 'POST') {
+      if (AUTH_MODE !== 'dev') return json(res, 403, { error: 'Password login is disabled — use SSO' });
+      const { email, name } = await readBody(req);
+      if (!email) return json(res, 400, { error: 'email required' });
+      const u = await findOrCreateUser({ email, name });
+      setSessionCookie(res, signSession(u.id));
+      return json(res, 200, { user: publicUser(u) });
+    }
+    if (urlPath === '/auth/login') { // SSO entry
+      if (AUTH_MODE === 'azure') { res.writeHead(302, { Location: azureAuthorizeUrl('nova') }); return res.end(); }
+      res.writeHead(302, { Location: '/login.html' }); return res.end();
+    }
+    if (urlPath === '/auth/callback') { // SSO return
+      try {
+        const code = new URL(req.url, 'http://localhost').searchParams.get('code');
+        const u = await findOrCreateUser(await azureExchange(code));
+        setSessionCookie(res, signSession(u.id));
+      } catch (e) { console.error('SSO callback failed:', e.message); }
+      res.writeHead(302, { Location: '/' }); return res.end();
+    }
+
+    // ---- gate everything else behind a session ----
+    const publicStatic = urlPath === '/login.html' || urlPath.startsWith('/director') ||
+      /\.(css|js|mjs|svg|png|jpe?g|webp|gif|ico|glb|gltf|bin|wasm|woff2?|ttf|map)$/i.test(urlPath);
+    if (!uid && !publicStatic) {
+      if (urlPath.startsWith('/api/')) return json(res, 401, { error: 'Not signed in' });
+      res.writeHead(302, { Location: '/login.html' }); return res.end();
+    }
+
     if (req.method === 'GET' && req.url === '/api/models') {
       return json(res, 200, MODELS.map(m => ({ ...m, available: !!KEYS[m.provider] })));
     }
     if (req.method === 'POST' && req.url === '/api/run') {
       const { model, inputs } = await readBody(req);
       if (!model) return json(res, 400, { error: 'model required' });
+      // per-generation quota: charge credits by the model's kind
+      const entry = MODELS.find(m => m.id === model);
+      const kind = entry?.kind || 'image';
+      const cost = CREDIT_COST[kind] ?? 1;
+      const me = await getUser(uid);
+      if (!me) return json(res, 401, { error: 'Not signed in' });
+      if (cost > 0 && (me.credits || 0) < cost) {
+        return json(res, 402, { error: `Out of credits — this ${kind} costs ${cost}, you have ${me.credits}. Ask an admin to top up.` });
+      }
       // async job queue — long generations (video, 3D) outlive proxy timeouts
       const jobId = 'j' + (jobSeq++).toString(36) + Date.now().toString(36);
       const job = { status: 'running', result: null, error: null, at: Date.now() };
       jobs.set(jobId, job);
       run(model, inputs || {})
-        .then(r => { job.status = 'done'; job.result = r; })
+        .then(r => { job.status = 'done'; job.result = r; if (cost > 0) recordUsage(uid, kind, model); })
         .catch(e => { job.status = 'error'; job.error = e.message || 'Generation failed'; });
       for (const [k, jv] of jobs) if (Date.now() - jv.at > 30 * 60e3) jobs.delete(k);
       return json(res, 200, { jobId });
@@ -547,32 +692,34 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { status: job.status, result: job.result, error: job.error });
     }
     // ---- projects API (backed by the store: local disk or Supabase) ----
+    // project keys are namespaced per user (multi-tenant)
+    const pfx = 'u/' + uid + '/';
     if (req.method === 'GET' && req.url === '/api/projects') {
-      const index = (await store.get('index')) || { list: [] };
+      const index = (await store.get(pfx + 'index')) || { list: [] };
       return json(res, 200, { ...index, storage: store.kind });
     }
-    const pm = /^\/api\/projects\/([\w-]{1,64})$/.exec(req.url);
+    const pm = /^\/api\/projects\/([\w-]{1,64})$/.exec(req.url.split('?')[0]);
     if (pm) {
       const id = pm[1];
       if (req.method === 'GET') {
-        const proj = await store.get('proj-' + id);
+        const proj = await store.get(pfx + 'proj-' + id);
         return proj ? json(res, 200, proj) : json(res, 404, { error: 'not found' });
       }
       if (req.method === 'PUT') {
         const body = await readBody(req);
         if (!body?.graph) return json(res, 400, { error: 'graph required' });
-        await store.put('proj-' + id, { name: body.name || 'Untitled', updatedAt: body.updatedAt || Date.now(), graph: body.graph });
-        const index = (await store.get('index')) || { list: [] };
+        await store.put(pfx + 'proj-' + id, { name: body.name || 'Untitled', updatedAt: body.updatedAt || Date.now(), graph: body.graph });
+        const index = (await store.get(pfx + 'index')) || { list: [] };
         index.list = index.list.filter(p => p.id !== id);
         index.list.push({ id, name: body.name || 'Untitled', updatedAt: body.updatedAt || Date.now() });
-        await store.put('index', index);
+        await store.put(pfx + 'index', index);
         return json(res, 200, { ok: true });
       }
       if (req.method === 'DELETE') {
-        await store.del('proj-' + id);
-        const index = (await store.get('index')) || { list: [] };
+        await store.del(pfx + 'proj-' + id);
+        const index = (await store.get(pfx + 'index')) || { list: [] };
         index.list = index.list.filter(p => p.id !== id);
-        await store.put('index', index);
+        await store.put(pfx + 'index', index);
         return json(res, 200, { ok: true });
       }
     }

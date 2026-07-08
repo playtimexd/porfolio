@@ -2364,8 +2364,64 @@ chatInput.addEventListener('input', () => {
   chatInput.style.height = Math.min(chatInput.scrollHeight, 110) + 'px';
 });
 
+// Account / auth --------------------------------------------------------
+let currentAccount = null;
+async function initAccount() {
+  try { currentAccount = (await (await fetch('/api/auth/me')).json()).user; } catch { currentAccount = null; }
+  if (!currentAccount) { location.href = '/login.html'; return; }
+  renderAccountChip();
+}
+function renderAccountChip() {
+  const lbl = document.getElementById('account-label');
+  if (lbl && currentAccount) lbl.textContent = `${currentAccount.name} · ${currentAccount.credits}⚡`;
+}
+function openAccountMenu() {
+  const existing = document.getElementById('account-menu');
+  if (existing) { existing.remove(); return; }
+  const u = currentAccount || {};
+  const m = el('div', { id: 'account-menu' });
+  m.appendChild(el('div', { class: 'am-head' }, u.name || 'Account'));
+  m.appendChild(el('div', { class: 'am-sub' }, `${u.email || ''} · ${u.role || 'member'}`));
+  m.appendChild(el('div', { class: 'am-credits' }, `Credits ${u.credits ?? '—'} · used ${u.used ?? 0}`));
+  const settings = el('button', {}, '⚙ Settings');
+  settings.addEventListener('click', () => { m.remove(); openSettingsModal(); });
+  m.appendChild(settings);
+  if (u.role === 'admin') {
+    const admin = el('button', {}, '🛠 Admin portal');
+    admin.addEventListener('click', () => { m.remove(); toast('Admin portal — coming in the next phase'); });
+    m.appendChild(admin);
+  }
+  const out = el('button', { class: 'danger' }, 'Log out');
+  out.addEventListener('click', async () => { try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {} location.href = '/login.html'; });
+  m.appendChild(out);
+  document.body.appendChild(m);
+  const r = document.getElementById('btn-account').getBoundingClientRect();
+  m.style.top = (r.bottom + 6) + 'px';
+  m.style.right = Math.max(8, innerWidth - r.right) + 'px';
+}
+function openSettingsModal() {
+  const body = openModal('Settings');
+  body.appendChild(el('div', { class: 'modal-hint' }, 'Signed in as ' + (currentAccount?.email || '') + '.'));
+  body.appendChild(el('label', {}, 'Display name'));
+  const inp = el('input', { type: 'text', value: currentAccount?.name || '' });
+  body.appendChild(inp);
+  const save = el('button', { class: 'primary' }, 'Save');
+  save.addEventListener('click', async () => {
+    const r = await fetch('/api/auth/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: inp.value }) });
+    const d = await r.json();
+    if (r.ok) { currentAccount = d.user; renderAccountChip(); closeModal(); toast('Saved'); }
+  });
+  body.appendChild(save);
+}
+document.getElementById('btn-account').addEventListener('click', (e) => { e.stopPropagation(); openAccountMenu(); });
+document.addEventListener('pointerdown', (e) => {
+  const m = document.getElementById('account-menu');
+  if (m && !e.target.closest('#account-menu') && !e.target.closest('#btn-account')) m.remove();
+});
+
 // Init -----------------------------------------------------------------
 (async function init() {
+  await initAccount();
   try { MODELS = await (await fetch('/api/models')).json(); } catch { MODELS = []; }
   // load or bootstrap projects (migrating the old single-graph save if present)
   try {

@@ -1711,36 +1711,6 @@ document.getElementById('btn-del-project').addEventListener('click', () => {
 });
 
 // Export / import -----------------------------------------------------------
-document.getElementById('btn-export').addEventListener('click', () => {
-  doSaveNow();
-  const meta = projects.list.find(p => p.id === projects.current);
-  const payload = { app: 'artcanvas', name: meta?.name || 'project', graph: serializeGraph() };
-  const a = el('a', {
-    href: URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })),
-    download: (payload.name.replace(/[^\w-]+/g, '_') || 'project') + '.artcanvas.json',
-  });
-  a.click();
-  toast('Project exported');
-});
-document.getElementById('btn-import').addEventListener('click', () => document.getElementById('import-file').click());
-document.getElementById('import-file').addEventListener('change', (e) => {
-  const f = e.target.files[0];
-  e.target.value = '';
-  if (!f) return;
-  const fr = new FileReader();
-  fr.onload = () => {
-    try {
-      const data = JSON.parse(fr.result);
-      const graph = data.graph || data; // accept raw graph exports too
-      if (!graph?.nodes?.length) throw new Error('no nodes');
-      createProject(data.name || f.name.replace(/\.[^.]*$/, ''), () => loadGraph(graph));
-      toast('Project imported');
-    } catch {
-      toast('Not a valid ArtCanvas project file', 'error');
-    }
-  };
-  fr.readAsText(f);
-});
 
 // Templates -------------------------------------------------------------
 const TEMPLATES = [

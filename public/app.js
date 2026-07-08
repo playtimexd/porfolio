@@ -138,10 +138,13 @@ const NODE_TYPES = {
       actionRow(node, box);
     },
     async exec(node, inputs) {
-      const imgs = Object.keys(inputs).filter(k => /^image\d+$/.test(k)).map(k => v(inputs[k])).filter(Boolean);
+      const refs = Object.keys(inputs).filter(k => /^image\d+$/.test(k)).map(k => inputs[k]).filter(Boolean);
+      const imgs = refs.filter(r => r.type === 'image').map(r => r.value);
+      const vid = refs.find(r => r.type === 'video')?.value; // first video reference (one max)
       const r = await api(node.data.model, {
         prompt: v(inputs.prompt),
         images: imgs.slice(0, 9),
+        video: vid,
         duration: node.data.duration,
         ratio: node.data.ratio,
         quality: node.data.quality,
@@ -729,8 +732,10 @@ function typeInputs(type) {
 // prompt + N image reference pins (one per reference the node holds)
 function refInputs(node) {
   const n = Math.max(1, Math.min(9, node?.data?.refCount || 1));
+  // Video model refs accept an image OR a video (one video max); image model refs are images only.
+  const t = node?.type === 'videoModel' ? 'any' : 'image';
   const pins = [{ name: 'prompt', type: 'text' }];
-  for (let i = 1; i <= n; i++) pins.push({ name: 'image' + i, type: 'image', optional: true, label: 'ref ' + i });
+  for (let i = 1; i <= n; i++) pins.push({ name: 'image' + i, type: t, optional: true, label: 'ref ' + i });
   return pins;
 }
 // (re)build a node's input/output connector pins from its current inputs
@@ -1061,6 +1066,11 @@ function tryConnect(from, targetPin) {
   if (from.dir === to.dir || from.nodeId === to.nodeId) return;
   const [src, dst] = from.dir === 'out' ? [from, to] : [to, from];
   if (dst.type !== 'any' && src.type !== dst.type) return;
+  // a video-model node accepts at most one video reference
+  if (src.type === 'video' && nodes.get(dst.nodeId)?.type === 'videoModel'
+      && edges.some(e => e.to.node === dst.nodeId && e.type === 'video' && e.to.port !== dst.portName)) {
+    toast('Only one video reference per video node'); return;
+  }
   const dstDef = inputsOf(nodes.get(dst.nodeId)).find(i => i.name === dst.portName);
   const max = dstDef?.multi || 1;
   const existing = edges.filter(e => e.to.node === dst.nodeId && e.to.port === dst.portName);

@@ -893,6 +893,42 @@ button.danger:hover { background: rgba(229,72,77,.15); }
   font-size: 14px;
 }
 #chat-send:disabled { opacity: .5; }
+#chat-attach-btn {
+  width: 38px; height: 38px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+#chat-attach-btn:hover { border-color: var(--accent); }
+#chat-attachments {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 10px 0;
+}
+.attach-chip { position: relative; width: 46px; height: 46px; }
+.attach-chip img, .attach-chip video {
+  width: 46px; height: 46px;
+  object-fit: cover;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+}
+.attach-chip button {
+  position: absolute; top: -6px; right: -6px;
+  width: 18px; height: 18px;
+  border: none; border-radius: 50%;
+  background: #e5484d; color: #fff;
+  font-size: 10px; line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.cmedia.refs img, .cmedia.refs video {
+  max-width: 84px; max-height: 84px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+}
 
 /* ---------- Assets panel ---------- */
 #assets {

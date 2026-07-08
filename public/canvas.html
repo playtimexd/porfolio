@@ -109,7 +109,10 @@
     </div>
     <div id="chat-cfg"></div>
     <div id="chat-msgs"></div>
+    <div id="chat-attachments" hidden></div>
     <form id="chat-form">
+      <button type="button" id="chat-attach-btn" title="Attach reference image or video">📎</button>
+      <input id="chat-attach-input" type="file" accept="image/*,video/*" multiple hidden>
       <textarea id="chat-input" rows="1" placeholder="Describe what you want to make…"></textarea>
       <button type="submit" id="chat-send">➤</button>
     </form>

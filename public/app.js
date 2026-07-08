@@ -1753,10 +1753,54 @@ const chatPanel = document.getElementById('chat');
 const chatMsgs = document.getElementById('chat-msgs');
 const chatInput = document.getElementById('chat-input');
 
+// Reference attachments (images/videos) staged for the next message
+let chatAttachments = [];
+function renderChatAttachments() {
+  const box = document.getElementById('chat-attachments');
+  if (!box) return;
+  box.innerHTML = '';
+  box.hidden = !chatAttachments.length;
+  chatAttachments.forEach((a, i) => {
+    const chip = el('div', { class: 'attach-chip' });
+    chip.appendChild(a.kind === 'video'
+      ? Object.assign(el('video', { src: a.src }), { muted: true })
+      : el('img', { src: a.src, title: a.name || '' }));
+    const x = el('button', { type: 'button', title: 'Remove' }, '✕');
+    x.addEventListener('click', () => { chatAttachments.splice(i, 1); renderChatAttachments(); });
+    chip.appendChild(x);
+    box.appendChild(chip);
+  });
+}
+function addChatAttachments(files) {
+  for (const f of files) {
+    if (chatAttachments.length >= 9) { toast('Up to 9 references at a time'); break; }
+    const kind = (f.type || '').startsWith('video') ? 'video' : 'image';
+    const fr = new FileReader();
+    fr.onload = () => { chatAttachments.push({ kind, src: fr.result, name: f.name }); renderChatAttachments(); };
+    fr.readAsDataURL(f);
+  }
+}
+// place chat-generated media straight onto the canvas (no manual node building)
+let chatDropOffset = 0;
+function dropChatMediaOnCanvas(kind, src) {
+  const rect = viewport.getBoundingClientRect();
+  const cx = (rect.width / 2 - panX) / zoom - 130 + chatDropOffset;
+  const cy = (rect.height / 2 - panY) / zoom - 90 + chatDropOffset;
+  chatDropOffset = (chatDropOffset + 46) % 230;
+  if (kind === 'image') {
+    addNode('upload', cx, cy, { image: src });
+  } else {
+    const n = addNode('output', cx, cy);
+    n.out.media = { kind: 'video', src };
+    refreshMedia(n);
+  }
+}
+
 const CHAT_SYSTEM =
   `You are ArtCanvas's creative agent — a friendly creative director chatting inside a node-based AI design studio. ` +
   `Help the user figure out and produce what they want: image prompt packs, scripts, storyboards, cinematic videos, image series.\n` +
   `- Converse naturally. If the request is vague, ask one or two short clarifying questions (subject, style, mood, format, how many) before producing work.\n` +
+  `- The user may attach reference images. When present, describe/honour them: match the subject, style, palette or composition, and weave that into the generation prompts.\n` +
   `- Text deliverables: set deliverable.kind to "prompts", "script" or "storyboard", give it a title, and put each item/scene/shot in shots — prompt is the full text of that item, caption a short label (e.g. "Scene 1 — INT. LIGHTHOUSE, NIGHT").\n` +
   `- Set kind to "images" or "video" ONLY when the user clearly asks you to generate now; shots then contain final, detailed generation prompts (max 9) with consistent characters, style and lighting. If unsure, confirm once first.\n` +
   `- Otherwise set kind "none" with an empty shots array.\n` +
@@ -1831,6 +1875,15 @@ function renderChat() {
     const w = el('div', { class: 'cmsg ' + (m.role === 'user' ? 'user' : 'agent') });
     const b = el('div', { class: 'cbubble' + (m.pending ? ' thinking' : '') });
     b.textContent = m.text;
+    if (m.attachments?.length) {
+      const g = el('div', { class: 'cmedia refs' });
+      for (const at of m.attachments) {
+        g.appendChild(at.kind === 'video'
+          ? Object.assign(el('video', { src: at.src, controls: '', loop: '' }), { muted: true })
+          : el('img', { src: at.src, title: at.name || 'reference' }));
+      }
+      b.appendChild(g);
+    }
     if (m.deliverable?.shots?.length) b.appendChild(renderDeliverable(m.deliverable));
     if (m.media?.length) {
       const g = el('div', { class: 'cmedia' });
@@ -1890,7 +1943,10 @@ async function sendChat(text) {
   if (chatBusy) return;
   chatBusy = true;
   document.getElementById('chat-send').disabled = true;
-  chatHistory.push({ role: 'user', text });
+  const attachments = chatAttachments.slice();
+  chatAttachments = []; renderChatAttachments();
+  const refImgs = attachments.filter(a => a.kind === 'image').map(a => a.src);
+  chatHistory.push({ role: 'user', text, attachments });
   const pending = { role: 'assistant', text: 'Thinking…', pending: true };
   chatHistory.push(pending);
   renderChat();
@@ -1901,7 +1957,7 @@ async function sendChat(text) {
       .slice(-12)
       .map(m => `${m.role === 'user' ? 'User' : 'Agent'}: ${m.text.length > 600 ? m.text.slice(0, 600) + '…' : m.text}${m.deliverable?.shots?.length ? `\n[delivered ${m.deliverable.kind}: ${m.deliverable.title}]` : ''}`)
       .join('\n');
-    const r = await api(chatCfg.model, { prompt: transcript + '\nAgent:', system: CHAT_SYSTEM, format: 'chat', maxTokens: 4000 });
+    const r = await api(chatCfg.model, { prompt: transcript + '\nAgent:', system: CHAT_SYSTEM, format: 'chat', maxTokens: 4000, images: refImgs.length ? refImgs : undefined });
     let parsed;
     try { parsed = JSON.parse(r.text); } catch {
       const m = r.text.match(/\{[\s\S]*\}/);
@@ -1915,7 +1971,7 @@ async function sendChat(text) {
     renderChat();
     save();
     if ((d.kind === 'images' || d.kind === 'video') && d.shots?.length) {
-      await runChatGeneration(d.kind === 'video' ? 'video' : 'image', d.shots.slice(0, 9));
+      await runChatGeneration(d.kind === 'video' ? 'video' : 'image', d.shots.slice(0, 9), refImgs);
     }
   } catch (err) {
     pending.pending = false;
@@ -1927,7 +1983,7 @@ async function sendChat(text) {
   chatInput.focus();
 }
 
-async function runChatGeneration(kind, shots) {
+async function runChatGeneration(kind, shots, refImgs) {
   const model = kind === 'video' ? chatCfg.videoModel : chatCfg.imageModel;
   const msg = { role: 'assistant', text: `Generating ${kind} 1/${shots.length}…`, media: [], pending: true };
   chatHistory.push(msg);
@@ -1937,14 +1993,15 @@ async function runChatGeneration(kind, shots) {
       msg.text = `Generating ${kind} ${i + 1}/${shots.length}…`;
       renderChat();
       const g = kind === 'video'
-        ? await api(model, { prompt: shots[i].prompt, duration: '5', ratio: '16:9' })
-        : await api(model, { prompt: shots[i].prompt, aspect: '1:1' });
+        ? await api(model, { prompt: shots[i].prompt, duration: '5', ratio: '16:9', image: refImgs?.[0] })
+        : await api(model, { prompt: shots[i].prompt, aspect: '1:1', images: refImgs?.length ? refImgs : undefined });
       const src = kind === 'video' ? g.video : g.image;
       msg.media.push({ kind, src, prompt: shots[i].prompt });
       addAsset(kind, src, shots[i].prompt);
+      dropChatMediaOnCanvas(kind, src); // land it on the canvas — no manual nodes needed
       renderChat();
     }
-    msg.text = `Done — ${msg.media.length} ${kind}${msg.media.length > 1 ? 's' : ''} generated. They’re in your Assets too.`;
+    msg.text = `Done — ${msg.media.length} ${kind}${msg.media.length > 1 ? 's' : ''} generated, added to the canvas and your Assets.`;
   } catch (err) {
     msg.text = `⚠ Generation failed: ${err.message}`;
   }
@@ -1959,6 +2016,8 @@ document.getElementById('btn-chat').addEventListener('click', () => {
 });
 document.getElementById('btn-director').addEventListener('click', openDirector);
 document.getElementById('chat-close').addEventListener('click', () => { chatPanel.hidden = true; });
+document.getElementById('chat-attach-btn').addEventListener('click', () => document.getElementById('chat-attach-input').click());
+document.getElementById('chat-attach-input').addEventListener('change', (e) => { addChatAttachments(e.target.files); e.target.value = ''; });
 document.getElementById('chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const text = chatInput.value.trim();

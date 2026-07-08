@@ -212,27 +212,6 @@ const NODE_TYPES = {
     },
   },
 
-  output: {
-    title: 'Output', color: '#e8e8ec', desc: 'preview',
-    inputs: [{ name: 'media', type: 'any' }], outputs: [],
-    defaults: () => ({}),
-    sub: () => '',
-    media(node) {
-      if (node.out.media) return mediaEl(node.out.media);
-      if (node.out.text) { const d = el('div', { class: 'text-out' }); d.textContent = node.out.text; return d; }
-      return el('div', { class: 'placeholder' }, 'Connect any node and run');
-    },
-    props(node, box) { actionRow(node, box); },
-    async exec(node, inputs) {
-      const media = inputs.media;
-      if (!media) throw new Error('Nothing connected');
-      node.out.media = null; node.out.text = null;
-      if (media.type === 'text') node.out.text = media.value;
-      else node.out.media = { kind: media.type, src: media.value };
-      refreshMedia(node);
-      return {};
-    },
-  },
 };
 
 // Small helpers ---------------------------------------------------------
@@ -1715,32 +1694,29 @@ document.getElementById('btn-del-project').addEventListener('click', () => {
 // Templates -------------------------------------------------------------
 const TEMPLATES = [
   {
-    name: 'Generate image', desc: 'Prompt → Image model → Output',
+    name: 'Generate image', desc: 'Prompt → Image model',
     build() {
       const p = addNode('prompt', 60, 200);
       const i = addNode('imageModel', 460, 170);
-      const o = addNode('output', 820, 200);
-      link(p, 'text', i, 'prompt'); link(i, 'image', o, 'media');
+      link(p, 'text', i, 'prompt');
     },
   },
   {
-    name: 'Image remix', desc: 'Upload + Prompt → Image model (img2img) → Output',
+    name: 'Image remix', desc: 'Upload + Prompt → Image model (img2img)',
     build() {
       const u = addNode('upload', 60, 80);
       const p = addNode('prompt', 60, 340);
-      const i = addNode('imageModel', 420, 190);
-      const o = addNode('output', 760, 210);
-      link(u, 'image', i, 'image'); link(p, 'text', i, 'prompt'); link(i, 'image', o, 'media');
+      const i = addNode('imageModel', 460, 190);
+      link(u, 'image', i, 'image'); link(p, 'text', i, 'prompt');
     },
   },
   {
-    name: 'Image to video', desc: 'Prompt → Image model → Video model (first frame) → Output',
+    name: 'Image to video', desc: 'Prompt → Image model → Video model (first frame)',
     build() {
       const p = addNode('prompt', 60, 200);
-      const i = addNode('imageModel', 400, 160);
-      const vd = addNode('videoModel', 740, 160);
-      const o = addNode('output', 1080, 200);
-      link(p, 'text', i, 'prompt'); link(p, 'text', vd, 'prompt'); link(i, 'image', vd, 'image'); link(vd, 'video', o, 'media');
+      const i = addNode('imageModel', 420, 160);
+      const vd = addNode('videoModel', 780, 160);
+      link(p, 'text', i, 'prompt'); link(p, 'text', vd, 'prompt'); link(i, 'image', vd, 'image');
     },
   },
 ];
@@ -1846,13 +1822,8 @@ function dropChatMediaOnCanvas(kind, src) {
   const cx = (rect.width / 2 - panX) / zoom - 130 + chatDropOffset;
   const cy = (rect.height / 2 - panY) / zoom - 90 + chatDropOffset;
   chatDropOffset = (chatDropOffset + 46) % 230;
-  if (kind === 'image') {
-    addNode('upload', cx, cy, { image: src, title: 'Image' });
-  } else {
-    const n = addNode('output', cx, cy);
-    n.out.media = { kind: 'video', src };
-    refreshMedia(n);
-  }
+  // Only images become canvas nodes; video stays in the chat + Assets.
+  if (kind === 'image') addNode('upload', cx, cy, { image: src, title: 'Image' });
 }
 
 const CHAT_SYSTEM =

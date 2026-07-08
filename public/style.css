@@ -848,6 +848,11 @@ button.danger:hover { background: rgba(229,72,77,.15); }
 }
 .deliv-title .deliv-btns { display: flex; gap: 4px; }
 .deliv-title button { padding: 3px 8px; font-size: 10px; border-radius: 6px; }
+.deliv-title button.gen {
+  background: linear-gradient(135deg, var(--accent), #6448d6);
+  border: none; color: #fff; font-weight: 600;
+}
+.deliv-title button.gen:disabled { opacity: .6; }
 .deliv-body { padding: 8px 10px; max-height: 220px; overflow-y: auto; }
 .deliv-shot { margin-bottom: 8px; }
 .deliv-shot b { display: block; font-size: 10.5px; color: var(--text-dim); margin-bottom: 2px; }

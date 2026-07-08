@@ -1802,7 +1802,8 @@ const CHAT_SYSTEM =
   `- Converse naturally. If the request is vague, ask one or two short clarifying questions (subject, style, mood, format, how many) before producing work.\n` +
   `- The user may attach reference images. When present, describe/honour them: match the subject, style, palette or composition, and weave that into the generation prompts.\n` +
   `- Text deliverables: set deliverable.kind to "prompts", "script" or "storyboard", give it a title, and put each item/scene/shot in shots — prompt is the full text of that item, caption a short label (e.g. "Scene 1 — INT. LIGHTHOUSE, NIGHT").\n` +
-  `- Set kind to "images" or "video" ONLY when the user clearly asks you to generate now; shots then contain final, detailed generation prompts (max 9) with consistent characters, style and lighting. If unsure, confirm once first.\n` +
+  `- When the user asks to generate, create, make, render or "put on the canvas" images (or a video), set kind to "images" (or "video") and put final, detailed generation prompts in shots (max 9) with consistent characters, style and lighting. PREFER generating over merely returning prompts — the app renders them straight onto the canvas. Do NOT ask to confirm unless the request is genuinely ambiguous.\n` +
+  `- Use kind "prompts"/"script"/"storyboard" only when the user explicitly wants text to review rather than finished images.\n` +
   `- Otherwise set kind "none" with an empty shots array.\n` +
   `Reply as JSON only: {"reply": "...", "deliverable": {"kind": "...", "title": "...", "shots": [{"prompt": "...", "caption": "..."}]}}. Keep replies concise and warm.`;
 
@@ -1926,6 +1927,12 @@ function renderDeliverable(d) {
   });
   btns.appendChild(copy);
   btns.appendChild(toCanvas);
+  // Turn a set of prompts into actual images, dropped on the canvas.
+  if (d.kind !== 'video') {
+    const gen = el('button', { class: 'gen' }, '🎨 Generate on canvas');
+    gen.addEventListener('click', () => generateDeliverable(d, gen));
+    btns.appendChild(gen);
+  }
   head.appendChild(btns);
   card.appendChild(head);
   const body = el('div', { class: 'deliv-body' });
@@ -1981,6 +1988,18 @@ async function sendChat(text) {
   chatBusy = false;
   document.getElementById('chat-send').disabled = false;
   chatInput.focus();
+}
+
+async function generateDeliverable(d, btn) {
+  if (chatBusy) { toast('Busy — wait for the current task to finish'); return; }
+  if (!d.shots?.length) return;
+  chatBusy = true;
+  document.getElementById('chat-send').disabled = true;
+  if (btn) { btn.disabled = true; btn.textContent = '🎨 Generating…'; }
+  await runChatGeneration('image', d.shots.slice(0, 9), null);
+  chatBusy = false;
+  document.getElementById('chat-send').disabled = false;
+  if (btn) { btn.disabled = false; btn.textContent = '🎨 Generate on canvas'; }
 }
 
 async function runChatGeneration(kind, shots, refImgs) {

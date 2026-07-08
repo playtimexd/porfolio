@@ -203,24 +203,14 @@ const NODE_TYPES = {
     sub: (n) => n.data.image ? (n.data.kind || 'image') : 'empty',
     media(node) {
       if (node.data.image) return mediaEl({ kind: node.data.kind || 'image', src: node.data.image });
-      return el('div', { class: 'placeholder' }, 'Choose an image or video in the panel →');
+      return el('div', { class: 'placeholder' }, 'Drop an image or video here, or choose one in the panel →');
     },
     props(node, box) {
       box.appendChild(el('label', {}, 'Image or video file'));
       const inp = el('input', { type: 'file', accept: 'image/*,video/*' });
-      inp.addEventListener('change', () => {
-        const f = inp.files[0];
-        if (!f) return;
-        const fr = new FileReader();
-        fr.onload = () => {
-          node.data.image = fr.result;
-          node.data.kind = (f.type || '').startsWith('video') ? 'video' : 'image';
-          buildPins(node);   // output pin type follows the file kind
-          refreshMedia(node); updateHead(node); redrawEdges(); save();
-        };
-        fr.readAsDataURL(f);
-      });
+      inp.addEventListener('change', () => handleUploadFile(node, inp.files[0]));
       box.appendChild(inp);
+      box.appendChild(el('div', { class: 'mini-hint' }, 'Or drag a file straight onto the node from a folder.'));
     },
     async exec(node) {
       if (!node.data.image) throw new Error('Nothing uploaded');
@@ -779,6 +769,33 @@ function buildPins(node) {
   div.querySelector('.node-head').after(left, right);
 }
 
+// Load a dropped/selected file into an Upload node (image or video).
+function handleUploadFile(node, file) {
+  if (!file) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    node.data.image = fr.result;
+    node.data.kind = (file.type || '').startsWith('video') ? 'video' : 'image';
+    buildPins(node); refreshMedia(node); updateHead(node); redrawEdges(); save();
+  };
+  fr.readAsDataURL(file);
+}
+// Let an Upload node accept files dropped from a folder.
+function enableUploadDrop(node) {
+  const eln = node.el;
+  eln.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    e.preventDefault(); e.stopPropagation(); eln.classList.add('dropping');
+  });
+  eln.addEventListener('dragleave', (e) => { if (e.target === eln) eln.classList.remove('dropping'); });
+  eln.addEventListener('drop', (e) => {
+    const f = [...(e.dataTransfer?.files || [])].find(x => /^(image|video)\//.test(x.type));
+    if (!f) return;
+    e.preventDefault(); e.stopPropagation(); eln.classList.remove('dropping');
+    handleUploadFile(node, f);
+  });
+}
+
 function addNode(type, x, y, data, id) {
   const def = NODE_TYPES[type];
   const node = {
@@ -824,6 +841,7 @@ function addNode(type, x, y, data, id) {
     e.stopPropagation();
   });
   makeDraggable(node, div);
+  if (type === 'upload') enableUploadDrop(node);
   save();
   drawMinimap();
   updateEmptyHint();
@@ -1333,6 +1351,25 @@ viewport.addEventListener('dblclick', (e) => {
   qaConnect = null;
   qaWorld = { x: (e.clientX - vr.left - panX) / zoom, y: (e.clientY - vr.top - panY) / zoom };
   showQuickAdd(e.clientX, e.clientY);
+});
+
+// Drop files from a folder onto empty canvas → new Upload node(s)
+viewport.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  if (!e.target.closest('.node')) viewport.classList.add('file-drop');
+});
+viewport.addEventListener('dragleave', (e) => { if (e.target === viewport) viewport.classList.remove('file-drop'); });
+viewport.addEventListener('drop', (e) => {
+  viewport.classList.remove('file-drop');
+  if (e.target.closest('.node')) return; // an Upload node handles its own drop
+  const files = [...(e.dataTransfer?.files || [])].filter(f => /^(image|video)\//.test(f.type));
+  if (!files.length) return;
+  e.preventDefault();
+  const vr = viewport.getBoundingClientRect();
+  let wx = (e.clientX - vr.left - panX) / zoom - 130;
+  let wy = (e.clientY - vr.top - panY) / zoom - 90;
+  for (const f of files) { const n = addNode('upload', wx, wy); handleUploadFile(n, f); wx += 40; wy += 40; }
 });
 
 function showQuickAdd(clientX, clientY) {

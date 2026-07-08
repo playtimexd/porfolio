@@ -617,6 +617,19 @@ video.lb-media { cursor: default; }
 }
 .node-refbtn:hover { border-color: var(--accent); color: var(--text); }
 
+/* file drag-and-drop states */
+.node.dropping { box-shadow: 0 0 0 2px var(--accent), 0 10px 34px rgba(124,92,255,.4); }
+#viewport.file-drop::after {
+  content: 'Drop image / video to add';
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; color: var(--accent-2);
+  background: rgba(124,92,255,.08);
+  border: 2px dashed var(--accent);
+  pointer-events: none;
+  z-index: 40;
+}
+
 /* reference picker (modal) */
 .rp-empty { color: var(--text-dim); font-size: 13px; padding: 10px 2px; }
 .rp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 10px; }

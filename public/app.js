@@ -639,26 +639,32 @@ function actionRow(node, box) {
 // Each chosen image becomes an Upload node on the canvas, auto-wired into
 // this node's image input — so references live on the canvas, not hidden here.
 function refControl(node, box) {
-  box.appendChild(el('label', {}, 'Reference images'));
+  box.appendChild(el('label', {}, 'Reference images (up to 9)'));
   const add = el('button', { class: 'ref-add' }, '＋ Add reference image');
   const input = el('input', { type: 'file', accept: 'image/*', multiple: '', hidden: '' });
   add.addEventListener('click', () => input.click());
   input.addEventListener('change', () => {
-    let off = 0;
-    for (const f of input.files) {
-      const oy = node.y + off; off += 150;
+    const files = [...input.files];
+    input.value = '';
+    // reference nodes sit BELOW the target node, staggered left→right
+    const already = edges.filter(e => e.to.node === node.id && e.to.port === 'image').length;
+    const belowY = node.y + (node.el?.offsetHeight || 220) + 40;
+    const startX = node.x - 285; // start a bit left so the row centers under the node
+    let placed = 0;
+    for (const f of files) {
+      if (already + placed >= 9) { toast('Up to 9 reference images per node'); break; }
+      const col = placed++;
       const fr = new FileReader();
       fr.onload = () => {
-        const u = addNode('upload', node.x - 300, oy, { image: fr.result, title: 'Reference' });
+        const u = addNode('upload', startX + col * 285, belowY, { image: fr.result, title: 'Reference' });
         connectPorts(u.id, 'image', node.id, 'image', 'image');
       };
       fr.readAsDataURL(f);
     }
-    input.value = '';
   });
   box.appendChild(add);
   box.appendChild(input);
-  box.appendChild(el('div', { class: 'mini-hint' }, 'Drops an image node on the canvas, wired into this node’s image input. Add several, or wire your own.'));
+  box.appendChild(el('div', { class: 'mini-hint' }, 'Each reference becomes an image node below, wired into this node’s image input (max 9). You can also drag-wire your own image nodes in.'));
 }
 
 function downloadNode(node) {

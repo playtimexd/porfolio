@@ -208,33 +208,41 @@ button:disabled { opacity: .5; cursor: default; }
   cursor: text;
 }
 
-/* 3D Director node — embeds the Director Desk viewport */
-.node[data-type="threeDirector"] { width: 560px; }
-.director-body { display: flex; flex-direction: column; }
-.director-frame {
-  display: block;
+/* 3D Director — full-page previs stage overlay */
+.director-overlay {
+  position: fixed; inset: 0;
+  z-index: 200;
+  display: flex; flex-direction: column;
+  background: #090909;
+}
+.director-overlay[hidden] { display: none; }
+.director-bar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 9px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.director-title { font-weight: 700; font-size: 14px; }
+.director-hint { color: var(--text-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.director-close {
+  margin-left: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.director-close:hover { border-color: var(--accent); }
+.director-overlay .director-frame {
+  flex: 1;
   width: 100%;
-  height: 380px;
   border: 0;
   background: #090909;
 }
-.director-capture {
-  display: flex; align-items: center; gap: 9px;
-  padding: 7px 9px;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.director-capture.empty { justify-content: center; text-align: center; }
-.director-capture img {
-  width: 72px !important;
-  height: 46px;
-  object-fit: cover;
-  border-radius: 5px;
-  border: 1px solid var(--border);
-}
-.director-cap-tag { color: #7cf0c8; font-weight: 600; }
 
 .node-ta {
   width: 100%;

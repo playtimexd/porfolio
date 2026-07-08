@@ -163,6 +163,21 @@ button:disabled { opacity: .5; cursor: default; }
 @keyframes nodepulse { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
 .node.error { border-color: #e5484d; }
 
+/* drag-to-resize handle (width) */
+.node-resize {
+  position: absolute;
+  right: 0; bottom: 0;
+  width: 16px; height: 16px;
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity .12s;
+  background:
+    linear-gradient(135deg, transparent 50%, var(--text-dim) 50%, var(--text-dim) 62%, transparent 62%, transparent 74%, var(--text-dim) 74%, var(--text-dim) 86%, transparent 86%);
+  border-bottom-right-radius: var(--radius);
+}
+.node:hover .node-resize, .node.selected .node-resize { opacity: .6; }
+.node-resize:hover { opacity: 1 !important; }
+
 .node-head {
   display: flex; align-items: center; gap: 7px;
   padding: 8px 8px 8px 11px;

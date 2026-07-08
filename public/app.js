@@ -46,7 +46,7 @@ const NODE_TYPES = {
         node.data.text = ta.value;
         // auto-grow with the content (up to a sane cap)
         ta.style.height = 'auto';
-        ta.style.height = Math.min(ta.scrollHeight, 320) + 'px';
+        ta.style.height = Math.min(ta.scrollHeight, 600) + 'px';
         updateHead(node);
         save();
         // keep the properties panel in sync if this node is selected there
@@ -608,6 +608,7 @@ function addNode(type, x, y, data, id) {
   const div = el('div', { class: 'node', 'data-id': node.id, 'data-type': type });
   div.style.left = x + 'px';
   div.style.top = y + 'px';
+  if (node.data.w) div.style.width = node.data.w + 'px';
 
   const head = el('div', { class: 'node-head' });
   head.style.setProperty('--hc', def.color);
@@ -644,9 +645,13 @@ function addNode(type, x, y, data, id) {
   div.appendChild(el('div', { class: 'node-media' }));
   div.appendChild(el('div', { class: 'node-status' }));
 
+  const rz = el('div', { class: 'node-resize', title: 'Drag to resize width' });
+  div.appendChild(rz);
+
   node.el = div;
   nodesLayer.appendChild(div);
   nodes.set(node.id, node);
+  makeResizable(node, rz);
   refreshMedia(node);
   updateHead(node);
 
@@ -705,6 +710,27 @@ function makeDraggable(node, handle) {
   handle.addEventListener('pointerup', () => {
     if (dragging && moved) { save(); drawMinimap(); }
     dragging = false;
+  });
+}
+
+function makeResizable(node, handle) {
+  let resizing = false, sx = 0, sw = 0;
+  handle.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); // don't start a node drag / selection
+    resizing = true;
+    sx = e.clientX;
+    sw = node.el.getBoundingClientRect().width / zoom;
+    handle.setPointerCapture(e.pointerId);
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!resizing) return;
+    node.data.w = Math.round(Math.max(200, Math.min(1400, sw + (e.clientX - sx) / zoom)));
+    node.el.style.width = node.data.w + 'px';
+    redrawEdges();
+  });
+  handle.addEventListener('pointerup', () => {
+    if (resizing) { save(); drawMinimap(); }
+    resizing = false;
   });
 }
 
@@ -870,6 +896,9 @@ function bindPin(pin, nodeId, portName, dir, type) {
       const target = document.elementFromPoint(ev.clientX, ev.clientY);
       if (target?.classList.contains('pin')) {
         tryConnect({ nodeId, portName, dir, type }, target);
+      } else if (!target?.closest('.node')) {
+        // dropped on empty canvas → offer compatible nodes to create + wire
+        openConnectorMenu({ nodeId, portName, dir, type }, ev.clientX, ev.clientY);
       }
     };
     pin.addEventListener('pointermove', move);
@@ -1134,50 +1163,109 @@ const quickadd = document.getElementById('quickadd');
 const qaInput = document.getElementById('qa-input');
 const qaList = document.getElementById('qa-list');
 let qaWorld = { x: 0, y: 0 };
+let qaConnect = null; // when set: { from: {nodeId, portName, dir, type} } — add + auto-wire
 
 viewport.addEventListener('dblclick', (e) => {
   if (e.target.closest('.node')) return;
   const vr = viewport.getBoundingClientRect();
+  qaConnect = null;
   qaWorld = { x: (e.clientX - vr.left - panX) / zoom, y: (e.clientY - vr.top - panY) / zoom };
+  showQuickAdd(e.clientX, e.clientY);
+});
+
+function showQuickAdd(clientX, clientY) {
   quickadd.hidden = false;
-  quickadd.style.left = Math.min(e.clientX, innerWidth - 240) + 'px';
-  quickadd.style.top = Math.min(e.clientY, innerHeight - 280) + 'px';
+  quickadd.style.left = Math.min(clientX, innerWidth - 240) + 'px';
+  quickadd.style.top = Math.min(clientY, innerHeight - 280) + 'px';
   qaInput.value = '';
+  qaInput.placeholder = qaConnect ? 'Connect to…' : 'Search nodes…';
   renderQaList('');
   qaInput.focus();
-});
+}
+
+// Drag off a pin and drop on empty canvas → offer compatible nodes to add + wire.
+function openConnectorMenu(from, clientX, clientY) {
+  const vr = viewport.getBoundingClientRect();
+  qaWorld = { x: (clientX - vr.left - panX) / zoom, y: (clientY - vr.top - panY) / zoom };
+  qaConnect = { from };
+  showQuickAdd(clientX, clientY);
+}
+
+// node types compatible with the dragged pin → [{ type, port }] (port to wire on the new node)
+function connectCandidates(from) {
+  const out = [];
+  for (const [type, def] of Object.entries(NODE_TYPES)) {
+    let port = null;
+    if (from.dir === 'out') {
+      const p = def.inputs.find(i => i.type === from.type || i.type === 'any');
+      if (p) port = p.name;
+    } else {
+      const o = def.outputs.find(o => from.type === 'any' || o.type === from.type);
+      if (o) port = o.name;
+    }
+    if (port) out.push({ type, port });
+  }
+  return out;
+}
+
+function connectPorts(srcId, srcPort, dstId, dstPort, type) {
+  if (srcId === dstId) return;
+  const dstNode = nodes.get(dstId);
+  const dstDef = NODE_TYPES[dstNode.type].inputs.find(i => i.name === dstPort);
+  const max = dstDef?.multi || 1;
+  const existing = edges.filter(e => e.to.node === dstId && e.to.port === dstPort);
+  if (existing.some(e => e.from.node === srcId && e.from.port === srcPort)) return;
+  if (max === 1) edges = edges.filter(e => !(e.to.node === dstId && e.to.port === dstPort));
+  else if (existing.length >= max) return;
+  edges.push({ id: 'e' + idCounter++, from: { node: srcId, port: srcPort }, to: { node: dstId, port: dstPort }, type });
+  redrawEdges(); save();
+}
 
 function renderQaList(filter) {
   qaList.innerHTML = '';
   const f = filter.toLowerCase();
-  for (const [type, def] of Object.entries(NODE_TYPES)) {
+  const allowed = qaConnect ? connectCandidates(qaConnect.from) : null;
+  const entries = allowed
+    ? allowed.map(c => [c.type, NODE_TYPES[c.type], c.port])
+    : Object.entries(NODE_TYPES).map(([t, d]) => [t, d, null]);
+  for (const [type, def, port] of entries) {
     if (f && !def.title.toLowerCase().includes(f) && !type.toLowerCase().includes(f) && !def.desc.includes(f)) continue;
     const item = el('div', { class: 'qa-item', 'data-type': type });
+    if (port) item.dataset.port = port;
     const dot = el('span', { class: 'hdot' });
     dot.style.setProperty('--hc', def.color);
     item.appendChild(dot);
     item.appendChild(document.createTextNode(def.title));
     item.appendChild(el('span', { class: 'desc' }, def.desc));
-    item.addEventListener('click', () => quickAddType(type));
+    item.addEventListener('click', () => quickAddType(type, port));
     qaList.appendChild(item);
   }
   qaList.querySelector('.qa-item')?.classList.add('active');
 }
 
-function quickAddType(type) {
+function quickAddType(type, port) {
+  const connect = qaConnect;
   hideQuickAdd();
   const node = addNode(type, qaWorld.x - 130, qaWorld.y - 40);
+  if (connect && port) {
+    const from = connect.from;
+    if (from.dir === 'out') connectPorts(from.nodeId, from.portName, node.id, port, from.type);
+    else {
+      const t = NODE_TYPES[type].outputs.find(o => o.name === port)?.type || from.type;
+      connectPorts(node.id, port, from.nodeId, from.portName, t);
+    }
+  }
   selectNode(node.id);
   redrawEdges();
 }
 
-function hideQuickAdd() { quickadd.hidden = true; }
+function hideQuickAdd() { quickadd.hidden = true; qaConnect = null; }
 qaInput.addEventListener('input', () => renderQaList(qaInput.value));
 qaInput.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') hideQuickAdd();
   if (e.key === 'Enter') {
     const first = qaList.querySelector('.qa-item.active') || qaList.querySelector('.qa-item');
-    if (first) quickAddType(first.dataset.type);
+    if (first) quickAddType(first.dataset.type, first.dataset.port);
   }
 });
 

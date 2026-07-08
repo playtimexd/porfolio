@@ -920,6 +920,13 @@ button.danger:hover { background: rgba(229,72,77,.15); }
   max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .skill-chip.on { background: rgba(124,92,255,.18); border-color: var(--accent); color: var(--accent-2); }
+.skill-tools { display: flex; gap: 8px; margin-top: 10px; }
+.skill-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.preset-chip {
+  font-size: 12px; padding: 5px 11px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text); cursor: pointer;
+}
+.preset-chip:hover { border-color: var(--accent); }
 #chat-cfg select {
   flex: 1 1 calc(50% - 3px);
   min-width: 0;

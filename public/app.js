@@ -1539,6 +1539,28 @@ try { SKILLS = JSON.parse(localStorage.getItem('artcanvas-skills') || '[]'); } c
 function saveSkills() {
   try { localStorage.setItem('artcanvas-skills', JSON.stringify(SKILLS)); } catch { /* ignore */ }
 }
+const newSkillId = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+// Built-in starter skills (add & then edit).
+const PRESET_SKILLS = [
+  { name: 'Cinematic photo', text: 'Render as a cinematic photograph: warm color grade, soft directional key light, shallow depth of field, subtle film grain and natural imperfections. Avoid flat, over-lit or plastic looks.' },
+  { name: 'Flat vector', text: 'Produce a clean flat vector illustration: bold simple shapes, solid fills, a limited palette, crisp edges and generous negative space. No photographic texture or heavy gradients unless asked.' },
+  { name: 'Product studio', text: 'Studio product shot: seamless neutral backdrop, soft three-point lighting, a gentle reflection on the surface, sharp focus on the product, no distracting props.' },
+  { name: 'Minimal / brand-safe', text: 'Keep it minimal and brand-safe: a restrained palette, plenty of negative space, clean composition, no clutter, and no real logos or trademarked characters.' },
+];
+
+// Parse an uploaded skill file (Claude Code-style: YAML frontmatter + markdown body).
+function parseSkillFile(raw, filename) {
+  let name = (filename || 'Imported skill').replace(/\.[^.]*$/, '');
+  let text = (raw || '').trim();
+  const m = /^﻿?---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/.exec(raw || '');
+  if (m) {
+    const nm = /(^|\n)\s*name\s*:\s*(.+)/.exec(m[1]);
+    if (nm) name = nm[2].trim().replace(/^["']|["']$/g, '');
+    text = m[2].trim();
+  }
+  return { id: newSkillId(), name: name || 'Imported skill', text };
+}
 
 function skillsTextFor(node) {
   return (node.data.skills || [])
@@ -1605,13 +1627,31 @@ document.getElementById('btn-skills').addEventListener('click', () => {
       row.appendChild(text);
       body.appendChild(row);
     }
+    const tools = el('div', { class: 'skill-tools' });
     const add = el('button', { class: 'primary' }, '＋ New skill');
-    add.addEventListener('click', () => {
-      SKILLS.push({ id: 's' + Date.now().toString(36), name: 'New skill', text: '' });
-      saveSkills();
-      render();
+    add.addEventListener('click', () => { SKILLS.push({ id: newSkillId(), name: 'New skill', text: '' }); saveSkills(); render(); });
+    const up = el('button', {}, '⬆ Upload .md');
+    const fin = el('input', { type: 'file', accept: '.md,.markdown,.txt,text/markdown,text/plain', hidden: '' });
+    up.addEventListener('click', () => fin.click());
+    fin.addEventListener('change', () => {
+      const f = fin.files[0]; fin.value = ''; if (!f) return;
+      const fr = new FileReader();
+      fr.onload = () => { SKILLS.push(parseSkillFile(fr.result, f.name)); saveSkills(); render(); toast('Skill imported'); };
+      fr.readAsText(f);
     });
-    body.appendChild(add);
+    tools.appendChild(add); tools.appendChild(up); tools.appendChild(fin);
+    body.appendChild(tools);
+
+    body.appendChild(el('div', { class: 'modal-hint' }, 'Presets — click to add a starter skill, then edit it:'));
+    const pres = el('div', { class: 'skill-presets' });
+    for (const p of PRESET_SKILLS) {
+      const b = el('button', { class: 'preset-chip' }, '＋ ' + p.name);
+      b.addEventListener('click', () => { SKILLS.push({ id: newSkillId(), name: p.name, text: p.text }); saveSkills(); render(); });
+      pres.appendChild(b);
+    }
+    body.appendChild(pres);
+    body.appendChild(el('div', { class: 'modal-hint' },
+      'Upload format: a Markdown file with optional YAML frontmatter — “name:” becomes the title, the body becomes the instructions (Claude Code SKILL.md style).'));
   };
   render();
 });
@@ -2011,19 +2051,20 @@ function buildChatCfg() {
 // toggle chips for skills the agent should follow (injected as system instructions)
 function buildChatSkills(cfg) {
   chatCfg.skills = (chatCfg.skills || []).filter(id => SKILLS.some(s => s.id === id));
-  if (!SKILLS.length) return;
   const row = el('div', { class: 'chat-skills' });
   row.appendChild(el('span', { class: 'chat-skills-lbl' }, 'Skills:'));
+  const setSkills = (ids) => { chatCfg.skills = ids; setPref('chat:skills', JSON.stringify(ids)); buildChatCfg(); };
+  // Orchestrator = no skill active (default LLM behavior)
+  const orch = el('button', { class: 'skill-chip' + (chatCfg.skills.length ? '' : ' on'), title: 'Default agent — no custom skill applied' }, '⚙ Orchestrator');
+  orch.addEventListener('click', () => setSkills([]));
+  row.appendChild(orch);
   for (const s of SKILLS) {
     const on = chatCfg.skills.includes(s.id);
     const chip = el('button', { class: 'skill-chip' + (on ? ' on' : ''), title: s.text ? s.text.slice(0, 200) : 'No instructions yet' }, s.name || 'Untitled');
-    chip.addEventListener('click', () => {
-      chatCfg.skills = chatCfg.skills.includes(s.id) ? chatCfg.skills.filter(x => x !== s.id) : [...chatCfg.skills, s.id];
-      setPref('chat:skills', JSON.stringify(chatCfg.skills));
-      chip.classList.toggle('on');
-    });
+    chip.addEventListener('click', () => setSkills(on ? chatCfg.skills.filter(x => x !== s.id) : [...chatCfg.skills, s.id]));
     row.appendChild(chip);
   }
+  if (!SKILLS.length) row.appendChild(el('span', { class: 'chat-skills-lbl' }, '(add skills via the Skills button)'));
   cfg.appendChild(row);
 }
 

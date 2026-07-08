@@ -941,7 +941,7 @@ function renderProps(node) {
   if (!node) {
     propsTitle.textContent = 'Properties';
     const d = el('div', { class: 'props-empty' });
-    d.innerHTML = 'Select a node to edit its settings.<br><br><b>Shortcuts</b><br>Double-click — add node<br>Drag pins — connect<br>Arrow keys — nudge (Shift = faster)<br>Ctrl+D — duplicate<br>Del — delete<br>F — fit view';
+    d.innerHTML = 'Select a node to edit its settings.<br><br><b>Shortcuts</b><br>Double-click — add node<br>Drag pins — connect<br>Arrow keys — nudge (Shift = faster)<br>Ctrl+Z / Ctrl+Shift+Z — undo / redo<br>Ctrl+D — duplicate<br>Del — delete<br>F — fit view';
     propsBody.appendChild(d);
     return;
   }
@@ -983,6 +983,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
     if (selected.kind === 'node') removeNode(selected.id);
     else { edges = edges.filter(ed => ed.id !== selected.id); redrawEdges(); save(); }
@@ -1741,6 +1743,67 @@ function save() {
   if (suspendSave) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(doSaveNow, 400);
+  recordHistory();
+}
+
+// ---- Undo / Redo (canvas graph only; chat is left untouched) ----
+let undoStack = [], redoStack = [], histTimer = null, suspendHistory = false, lastSnap = null;
+function graphSnapshot() {
+  return JSON.stringify({
+    idCounter,
+    nodes: [...nodes.values()].map(n => ({ id: n.id, type: n.type, x: n.x, y: n.y, data: n.data })),
+    edges,
+  });
+}
+function initHistory() {
+  clearTimeout(histTimer);
+  lastSnap = graphSnapshot();
+  undoStack = [lastSnap];
+  redoStack = [];
+}
+function recordHistory() {
+  if (suspendHistory) return;
+  clearTimeout(histTimer);
+  histTimer = setTimeout(() => {           // debounce so rapid edits coalesce into one step
+    const s = graphSnapshot();
+    if (s === lastSnap) return;
+    undoStack.push(s);
+    if (undoStack.length > 80) undoStack.shift();
+    redoStack = [];
+    lastSnap = s;
+  }, 350);
+}
+function applyGraphSnapshot(s) {
+  suspendHistory = true;
+  const g = JSON.parse(s);
+  const chat = chatHistory;                // preserve chat across undo
+  clearCanvas();
+  chatHistory = chat;
+  idCounter = g.idCounter || 1;
+  for (const n of g.nodes) if (NODE_TYPES[n.type]) addNode(n.type, n.x, n.y, n.data, n.id);
+  edges = (g.edges || []).filter(e => nodes.has(e.from.node) && nodes.has(e.to.node));
+  lastSnap = s;
+  redrawEdges(); drawMinimap(); updateEmptyHint(); renderProps(null);
+  suspendHistory = false;
+  save();
+}
+function undo() {
+  clearTimeout(histTimer);
+  // fold any pending change into the stack first
+  const cur = graphSnapshot();
+  if (cur !== lastSnap) { undoStack.push(cur); lastSnap = cur; }
+  if (undoStack.length < 2) { toast('Nothing to undo'); return; }
+  redoStack.push(undoStack.pop());
+  applyGraphSnapshot(undoStack[undoStack.length - 1]);
+  toast('Undo');
+}
+function redo() {
+  clearTimeout(histTimer);
+  if (!redoStack.length) { toast('Nothing to redo'); return; }
+  const s = redoStack.pop();
+  undoStack.push(s);
+  applyGraphSnapshot(s);
+  toast('Redo');
 }
 
 function saveProjectsMeta() {
@@ -1803,6 +1866,7 @@ function openProject(id, opts = {}) {
   if (raw) { try { loadGraph(JSON.parse(raw)); } catch { /* start empty */ } }
   suspendSave = false;
   doSaveNow();
+  initHistory();
   updateProjectUI();
   renderProps(null);
   requestAnimationFrame(() => { fitView(); redrawEdges(); });
@@ -1820,6 +1884,7 @@ function createProject(name, build, opts = {}) {
   if (build) build(); // no builder → start with an empty canvas
   suspendSave = false;
   doSaveNow();
+  initHistory();
   updateProjectUI();
   renderProps(null);
   requestAnimationFrame(() => { fitView(); redrawEdges(); });

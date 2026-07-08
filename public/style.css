@@ -586,6 +586,22 @@ video.lb-media { cursor: default; }
 #props-body .btn-row { display: flex; gap: 8px; margin-top: 2px; }
 #props-body .btn-row button { flex: 1; }
 
+/* reference uploader (Image/Video nodes) */
+.ref-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.ref-empty { font-size: 11px; color: var(--text-dim); }
+.ref-chip { position: relative; width: 48px; height: 48px; }
+.ref-chip img, .ref-chip video {
+  width: 48px; height: 48px; object-fit: cover;
+  border-radius: 7px; border: 1px solid var(--border);
+}
+.ref-chip button {
+  position: absolute; top: -6px; right: -6px;
+  width: 18px; height: 18px; border: none; border-radius: 50%;
+  background: #e5484d; color: #fff; font-size: 10px; line-height: 1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
+}
+.ref-add { width: 100%; }
+
 /* ---------- Minimap ---------- */
 #minimap {
   position: fixed;

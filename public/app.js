@@ -640,45 +640,58 @@ function actionRow(node, box) {
 // Reference uploader for Image/Video node props.
 // Each chosen image becomes an Upload node on the canvas, auto-wired into
 // this node's image input — so references live on the canvas, not hidden here.
-// Open a picker; each chosen image becomes a separate Upload node placed
-// below the target, staggered, and wired into its image input (max 9).
+// Open a window listing image nodes already on the canvas; picking one wires
+// it into this node's image input as a reference (max 9).
 function pickReferences(node) {
-  const input = el('input', { type: 'file', accept: 'image/*', multiple: '', hidden: '' });
-  document.body.appendChild(input);
-  input.addEventListener('change', () => {
-    const files = [...input.files];
-    input.remove();
-    const already = edges.filter(e => e.to.node === node.id && e.to.port === 'image').length;
-    const belowY = node.y + (node.el?.offsetHeight || 220) + 40;
-    const startX = node.x - 285; // start a bit left so the row centers under the node
-    let placed = 0;
-    for (const f of files) {
-      if (already + placed >= 9) { toast('Up to 9 reference images per node'); break; }
-      const col = placed++;
-      const fr = new FileReader();
-      fr.onload = () => {
-        const u = addNode('upload', startX + col * 285, belowY, { image: fr.result, title: 'Reference' });
-        connectPorts(u.id, 'image', node.id, 'image', 'image');
-      };
-      fr.readAsDataURL(f);
-    }
-  });
-  input.click();
+  const body = openModal('Add a reference from the canvas');
+  const already = edges.filter(e => e.to.node === node.id && e.to.port === 'image');
+  const linked = new Set(already.map(e => e.from.node));
+  const candidates = [...nodes.values()].filter(n =>
+    n.id !== node.id &&
+    !linked.has(n.id) &&
+    NODE_TYPES[n.type].outputs.some(o => o.type === 'image'));
+
+  body.appendChild(el('div', { class: 'modal-hint' },
+    'Pick an image node on the canvas to use as a reference — it gets wired into this node’s image input. ' +
+    'This node has ' + already.length + '/9 references.'));
+
+  if (already.length >= 9) {
+    body.appendChild(el('div', { class: 'rp-empty' }, 'Already at the 9-reference limit. Remove one first (select it and press Del).'));
+    return;
+  }
+  if (!candidates.length) {
+    body.appendChild(el('div', { class: 'rp-empty' }, 'No other image nodes on the canvas yet. Add an Upload node (dock ⇧), generate an image, or capture one from the 3D Director — then it’ll show up here.'));
+    return;
+  }
+  const grid = el('div', { class: 'rp-grid' });
+  for (const c of candidates) {
+    const item = el('div', { class: 'rp-item' });
+    const src = c.data?.image || (c.out?.media?.kind === 'image' ? c.out.media.src : null);
+    item.appendChild(src ? el('img', { src }) : el('div', { class: 'rp-thumb' }, '◫'));
+    item.appendChild(el('span', {}, c.data?.title || NODE_TYPES[c.type].title));
+    item.addEventListener('click', () => {
+      connectPorts(c.id, 'image', node.id, 'image', 'image');
+      closeModal();
+      toast('Reference linked');
+    });
+    grid.appendChild(item);
+  }
+  body.appendChild(grid);
 }
 
 // The "＋ Add reference" button that lives at the bottom of Image/Video nodes.
 function refButton(node) {
-  const b = el('button', { class: 'node-refbtn', title: 'Add a reference image (wired in below)' }, '＋ Add reference');
+  const b = el('button', { class: 'node-refbtn', title: 'Link another image node as a reference' }, '＋ Add reference');
   b.addEventListener('click', (e) => { e.stopPropagation(); pickReferences(node); });
   return b;
 }
 
 function refControl(node, box) {
   box.appendChild(el('label', {}, 'Reference images (up to 9)'));
-  const add = el('button', { class: 'ref-add' }, '＋ Add reference image');
+  const add = el('button', { class: 'ref-add' }, '＋ Add reference');
   add.addEventListener('click', () => pickReferences(node));
   box.appendChild(add);
-  box.appendChild(el('div', { class: 'mini-hint' }, 'Each reference becomes a separate image node below, wired into this node’s image input (max 9). You can also drag-wire your own image nodes in.'));
+  box.appendChild(el('div', { class: 'mini-hint' }, 'Links another image node from the canvas into this node’s image input (max 9). You can also drag-wire nodes in, or delete a reference with Del.'));
 }
 
 function downloadNode(node) {

@@ -617,6 +617,18 @@ video.lb-media { cursor: default; }
 }
 .node-refbtn:hover { border-color: var(--accent); color: var(--text); }
 
+/* reference picker (modal) */
+.rp-empty { color: var(--text-dim); font-size: 13px; padding: 10px 2px; }
+.rp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; margin-top: 10px; }
+.rp-item {
+  border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
+  cursor: pointer; background: var(--panel-2); transition: border-color .12s, transform .1s;
+}
+.rp-item:hover { border-color: var(--accent); transform: translateY(-2px); }
+.rp-item img { display: block; width: 100%; height: 84px; object-fit: cover; }
+.rp-item .rp-thumb { height: 84px; display: flex; align-items: center; justify-content: center; font-size: 26px; color: var(--text-dim); }
+.rp-item span { display: block; padding: 6px 8px; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- Minimap ---------- */
 #minimap {
   position: fixed;

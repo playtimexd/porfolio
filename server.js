@@ -593,6 +593,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`ArtCanvas Studio → http://localhost:${PORT}`);
+  console.log(`Nova (Behaviour NASA) → http://localhost:${PORT}`);
   console.log('Providers configured:', Object.entries(KEYS).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none');
 });

@@ -1,7 +1,7 @@
 {
-  "name": "artcanvas-studio",
+  "name": "nova",
   "version": "1.0.0",
-  "description": "Node-based multi-model AI design studio — canvas pipelines, agent chat, GPT/Claude/Gemini/Sora/Seedance",
+  "description": "Nova — a node-based multi-model AI creative canvas (Behaviour Interactive · NASA). Canvas pipelines, agent chat, 3D previs; Nano Banana/Gemini/GPT/Sora/Seedance/Meshy.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

@@ -2416,7 +2416,7 @@ function openAccountMenu() {
   const u = currentAccount || {};
   const m = el('div', { id: 'account-menu' });
   m.appendChild(el('div', { class: 'am-head' }, u.name || 'Account'));
-  m.appendChild(el('div', { class: 'am-sub' }, `${u.email || ''} · ${u.role || 'member'}`));
+  m.appendChild(el('div', { class: 'am-sub' }, `${u.email || ''} · ${ROLE_LABEL[u.role] || u.role || 'member'}`));
   m.appendChild(el('div', { class: 'am-credits' }, `Credits ${u.credits ?? '—'} · used ${u.used ?? 0}`));
   const settings = el('button', {}, '⚙ Settings');
   settings.addEventListener('click', () => { m.remove(); openSettingsModal(); });
@@ -2448,58 +2448,72 @@ function openSettingsModal() {
   });
   body.appendChild(save);
 }
+const ROLE_LABEL = { enterprise_admin: 'Enterprise admin', team_admin: 'Team admin', member: 'Member' };
 async function openAdminModal() {
-  const body = openModal('Admin portal — users, credits & usage');
+  const body = openModal('Admin portal — users, teams & credits');
+  const patch = (id, b) => fetch('/api/admin/user/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
   const render = async () => {
     body.innerHTML = '';
     let data;
     try { data = await (await fetch('/api/admin/users')).json(); }
     catch { body.appendChild(el('div', { class: 'modal-hint' }, 'Failed to load.')); return; }
-    if (data.totals) {
-      body.appendChild(el('div', { class: 'modal-hint' },
-        `${data.totals.users} users · ${data.totals.used} credits used · ${data.totals.credits} remaining. Costs: image 1 · 3D 3 · video 5.`));
+    const isEnt = data.me && data.me.role === 'enterprise_admin';
+    const teams = data.teams || [];
+    const teamOpts = (sel) => { const s = el('select', { class: 'ar-team' }); s.appendChild(el('option', { value: '' }, '— no team —')); for (const t of teams) { const o = el('option', { value: t.id }, t.name); if (t.id === sel) o.selected = true; s.appendChild(o); } return s; };
+    const roleSel = (u) => { const s = el('select', { class: 'ar-rolesel' }); const opts = isEnt ? ['enterprise_admin', 'team_admin', 'member'] : ['team_admin', 'member']; for (const r of opts) { const o = el('option', { value: r }, ROLE_LABEL[r]); if (r === u.role) o.selected = true; s.appendChild(o); } return s; };
+
+    body.appendChild(el('div', { class: 'modal-hint' },
+      `${isEnt ? 'Enterprise admin' : 'Team admin'} · ${data.totals.users} users · ${data.totals.used} credits used · ${data.totals.credits} remaining. Costs: image 1 · 3D 3 · video 5.`));
+
+    // teams (enterprise admin creates them)
+    if (isEnt) {
+      const trow = el('div', { class: 'admin-invite' });
+      const tname = el('input', { type: 'text', placeholder: 'new team name…' });
+      const tbtn = el('button', {}, '＋ Team');
+      tbtn.addEventListener('click', async () => { if (!tname.value.trim()) return; await fetch('/api/admin/teams', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: tname.value.trim() }) }); render(); });
+      trow.append(el('span', { class: 'ar-lbl' }, 'Teams:'), tname, tbtn);
+      for (const t of teams) trow.appendChild(el('span', { class: 'team-chip' }, t.name));
+      body.appendChild(trow);
     }
-    // invite row
+
+    // invite
     const inv = el('div', { class: 'admin-invite' });
     const iemail = el('input', { type: 'email', placeholder: 'invite email…' });
-    const iname = el('input', { type: 'text', placeholder: 'name (optional)' });
+    const iname = el('input', { type: 'text', placeholder: 'name' });
     const icred = el('input', { type: 'number', value: '500', title: 'starting credits' });
+    const irole = isEnt ? roleSel({ role: 'member' }) : null;
+    const iteam = isEnt ? teamOpts('') : null;
     const ibtn = el('button', { class: 'primary' }, '＋ Invite');
     ibtn.addEventListener('click', async () => {
       if (!iemail.value.trim()) return;
-      await fetch('/api/admin/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: iemail.value.trim(), name: iname.value.trim(), credits: Number(icred.value) || 0 }) });
+      const b = { email: iemail.value.trim(), name: iname.value.trim(), credits: Number(icred.value) || 0 };
+      if (isEnt) { b.role = irole.value; b.teamId = iteam.value || null; }
+      await fetch('/api/admin/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
       render();
     });
-    inv.append(iemail, iname, icred, ibtn);
+    inv.append(iemail, iname, icred); if (isEnt) inv.append(irole, iteam); inv.append(ibtn);
     body.appendChild(inv);
+
     // user table
     const table = el('div', { class: 'admin-table' });
     for (const u of (data.users || [])) {
       const row = el('div', { class: 'admin-row' });
       const info = el('div', { class: 'ar-info' });
       info.appendChild(el('b', {}, u.name || '—'));
-      info.appendChild(el('span', {}, u.email));
+      info.appendChild(el('span', {}, u.email + (u.team ? ' · ' + u.team : '')));
       row.appendChild(info);
-      const role = el('button', { class: 'ar-role' + (u.role === 'admin' ? ' on' : '') }, u.role);
-      role.addEventListener('click', async () => {
-        const r = await fetch('/api/admin/user/' + u.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: u.role === 'admin' ? 'member' : 'admin' }) });
-        const d = await r.json(); if (!r.ok) toast(d.error || 'failed', 'error'); render();
-      });
-      row.appendChild(role);
+      const rs = roleSel(u);
+      rs.addEventListener('change', async () => { const r = await patch(u.id, { role: rs.value }); const d = await r.json(); if (!r.ok) toast(d.error || 'failed', 'error'); render(); });
+      row.appendChild(rs);
+      if (isEnt) { const ts = teamOpts(u.teamId); ts.addEventListener('change', async () => { await patch(u.id, { teamId: ts.value || null }); render(); }); row.appendChild(ts); }
       const cred = el('input', { type: 'number', value: u.credits, class: 'ar-cred' });
       const setc = el('button', {}, 'Set');
-      setc.addEventListener('click', async () => {
-        await fetch('/api/admin/user/' + u.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credits: Number(cred.value) || 0 }) });
-        render();
-      });
+      setc.addEventListener('click', async () => { await patch(u.id, { credits: Number(cred.value) || 0 }); render(); });
       const credWrap = el('div', { class: 'ar-credwrap' }); credWrap.append(cred, setc);
       row.appendChild(credWrap);
       row.appendChild(el('div', { class: 'ar-used' }, `used ${u.used}`));
       const del = el('button', { class: 'ar-del danger', title: 'Remove user' }, '✕');
-      del.addEventListener('click', async () => {
-        const r = await fetch('/api/admin/user/' + u.id, { method: 'DELETE' });
-        const d = await r.json(); if (!r.ok) { toast(d.error || 'failed', 'error'); return; } render();
-      });
+      del.addEventListener('click', async () => { const r = await fetch('/api/admin/user/' + u.id, { method: 'DELETE' }); const d = await r.json(); if (!r.ok) { toast(d.error || 'failed', 'error'); return; } render(); });
       row.appendChild(del);
       table.appendChild(row);
     }

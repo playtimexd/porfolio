@@ -161,7 +161,14 @@ const crypto = require('crypto');
 const AUTH_MODE = (process.env.AUTH_MODE || 'dev').toLowerCase(); // 'dev' | 'azure'
 const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 days (ms)
 const DEFAULT_CREDITS = Number(process.env.DEFAULT_CREDITS || 500);
-const CREDIT_COST = { image: 1, video: 5, threed: 3, llm: 0 }; // credits per generation kind
+// credit cost per generation, varied by quality (image/3D) and duration×quality (video)
+function creditCost(kind, inputs = {}) {
+  if (kind === 'image') return inputs.quality === 'ultra' ? 4 : inputs.quality === 'high' ? 2 : 1;
+  if (kind === 'video') { const d = Number(inputs.duration) || 5; return Math.max(1, Math.round(d * (inputs.quality === '1080p' ? 1.5 : 1))); }
+  if (kind === 'threed') return inputs.quality === 'textured' ? 6 : 3;
+  if (kind === 'llm') return 0;
+  return 1;
+}
 
 // signing secret — from env, else persisted in DATA_DIR so dev logins survive restarts
 let SERVER_SECRET = process.env.SERVER_SECRET || '';
@@ -221,9 +228,9 @@ async function findOrCreateUser({ email, name, role }) {
 }
 async function currentUser(req) { return getUser(verifySession(parseCookies(req).nova_session)); }
 const publicUser = (u) => u && { id: u.id, email: u.email, name: u.name, role: u.role, teamId: u.teamId || null, credits: u.credits, used: u.used, settings: u.settings || {} };
-async function recordUsage(uid, kind, modelId) {
+async function recordUsage(uid, kind, modelId, cost) {
   const a = await getAccounts(); const u = a.users[uid]; if (!u) return;
-  const cost = CREDIT_COST[kind] ?? 1;
+  cost = cost != null ? cost : creditCost(kind);
   u.used = (u.used || 0) + cost;
   u.credits = Math.max(0, (u.credits || 0) - cost);
   u.lastActive = Date.now();
@@ -819,7 +826,7 @@ const server = http.createServer(async (req, res) => {
       // per-generation quota: charge credits by the model's kind
       const entry = MODELS.find(m => m.id === model);
       const kind = entry?.kind || 'image';
-      const cost = CREDIT_COST[kind] ?? 1;
+      const cost = creditCost(kind, inputs || {});
       const me = await getUser(uid);
       if (!me) return json(res, 401, { error: 'Not signed in' });
       if (cost > 0 && (me.credits || 0) < cost) {
@@ -830,7 +837,7 @@ const server = http.createServer(async (req, res) => {
       const job = { status: 'running', result: null, error: null, at: Date.now() };
       jobs.set(jobId, job);
       run(model, inputs || {})
-        .then(r => { job.status = 'done'; job.result = r; if (cost > 0) recordUsage(uid, kind, model); })
+        .then(r => { job.status = 'done'; job.result = r; if (cost > 0) recordUsage(uid, kind, model, cost); })
         .catch(e => { job.status = 'error'; job.error = e.message || 'Generation failed'; });
       for (const [k, jv] of jobs) if (Date.now() - jv.at > 30 * 60e3) jobs.delete(k);
       return json(res, 200, { jobId });

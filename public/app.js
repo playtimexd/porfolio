@@ -108,11 +108,15 @@ const NODE_TYPES = {
       c1.appendChild(selectCtl(node, 'aspect', RATIO_OPTS));
       const c2 = el('div');
       c2.appendChild(el('label', {}, 'Quality'));
-      c2.appendChild(selectCtl(node, 'quality', QUALITY_OPTS));
+      const qsel = selectCtl(node, 'quality', QUALITY_OPTS);
+      c2.appendChild(qsel);
       row.appendChild(c1); row.appendChild(c2);
       box.appendChild(row);
       box.appendChild(el('div', { class: 'mini-hint' }, 'Gemini honours every ratio + 2K/4K; GPT Image maps to its nearest canvas.'));
-      refControl(node, box);
+      const cost = el('div', { class: 'cost-line' });
+      const upd = () => { const c = creditCostClient('image', node.data); cost.textContent = `⚡ ${c} credit${c === 1 ? '' : 's'} per image`; };
+      qsel.addEventListener('change', upd); upd();
+      box.appendChild(cost);
       actionRow(node, box);
     },
     async exec(node, inputs) {
@@ -145,13 +149,16 @@ const NODE_TYPES = {
       box.appendChild(el('label', {}, 'Model'));
       box.appendChild(modelSelect(node, 'video'));
       const row = el('div', { class: 'row' });
-      const c1 = el('div'); c1.appendChild(el('label', {}, 'Duration')); c1.appendChild(selectCtl(node, 'duration', [['4', '4s'], ['5', '5s'], ['8', '8s'], ['10', '10s']]));
+      const c1 = el('div'); c1.appendChild(el('label', {}, 'Duration')); const dsel = selectCtl(node, 'duration', [['4', '4s'], ['5', '5s'], ['8', '8s'], ['10', '10s']]); c1.appendChild(dsel);
       const c2 = el('div'); c2.appendChild(el('label', {}, 'Ratio')); c2.appendChild(selectCtl(node, 'ratio', VIDEO_RATIO_OPTS));
-      const c3 = el('div'); c3.appendChild(el('label', {}, 'Quality')); c3.appendChild(selectCtl(node, 'quality', VIDEO_QUALITY_OPTS));
+      const c3 = el('div'); c3.appendChild(el('label', {}, 'Quality')); const qsel = selectCtl(node, 'quality', VIDEO_QUALITY_OPTS); c3.appendChild(qsel);
       row.appendChild(c1); row.appendChild(c2); row.appendChild(c3);
       box.appendChild(row);
       box.appendChild(el('div', { class: 'mini-hint' }, '1080p-class output needs Sora 2 Pro or Seedance; Sora 2 runs at 720p.'));
-      refControl(node, box);
+      const cost = el('div', { class: 'cost-line' });
+      const upd = () => { const c = creditCostClient('video', node.data); cost.textContent = `⚡ ${c} credits per video (${node.data.duration}s${node.data.quality === '1080p' ? ' · 1080p' : ''})`; };
+      dsel.addEventListener('change', upd); qsel.addEventListener('change', upd); upd();
+      box.appendChild(cost);
       actionRow(node, box);
     },
     async exec(node, inputs) {
@@ -248,6 +255,15 @@ function el(tag, attrs = {}, text) {
 
 function modelLabel(id) {
   return MODELS.find(m => m.id === id)?.label || id || '';
+}
+// credit cost estimate — mirrors the server's creditCost(): image by quality,
+// video by duration × quality, 3D by quality.
+function creditCostClient(kind, d) {
+  d = d || {};
+  if (kind === 'image') return d.quality === 'ultra' ? 4 : d.quality === 'high' ? 2 : 1;
+  if (kind === 'video') { const dur = Number(d.duration) || 5; return Math.max(1, Math.round(dur * (d.quality === '1080p' ? 1.5 : 1))); }
+  if (kind === 'threed') return d.quality === 'textured' ? 6 : 3;
+  return 1;
 }
 
 function mediaEl(media) {
@@ -679,13 +695,6 @@ function refButton(node) {
   return b;
 }
 
-function refControl(node, box) {
-  box.appendChild(el('label', {}, 'References'));
-  const add = el('button', { class: 'ref-add' }, '＋ Add reference input');
-  add.addEventListener('click', () => addRefPin(node));
-  box.appendChild(add);
-  box.appendChild(el('div', { class: 'mini-hint' }, 'Adds an image connector on the left of the node (up to 9). Drag each one to an image node’s output on the canvas.'));
-}
 
 function downloadNode(node) {
   const media = node.out.media;

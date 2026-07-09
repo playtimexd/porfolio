@@ -2388,7 +2388,7 @@ function openAccountMenu() {
   m.appendChild(settings);
   if (u.role === 'admin') {
     const admin = el('button', {}, '🛠 Admin portal');
-    admin.addEventListener('click', () => { m.remove(); toast('Admin portal — coming in the next phase'); });
+    admin.addEventListener('click', () => { m.remove(); openAdminModal(); });
     m.appendChild(admin);
   }
   const out = el('button', { class: 'danger' }, 'Log out');
@@ -2412,6 +2412,65 @@ function openSettingsModal() {
     if (r.ok) { currentAccount = d.user; renderAccountChip(); closeModal(); toast('Saved'); }
   });
   body.appendChild(save);
+}
+async function openAdminModal() {
+  const body = openModal('Admin portal — users, credits & usage');
+  const render = async () => {
+    body.innerHTML = '';
+    let data;
+    try { data = await (await fetch('/api/admin/users')).json(); }
+    catch { body.appendChild(el('div', { class: 'modal-hint' }, 'Failed to load.')); return; }
+    if (data.totals) {
+      body.appendChild(el('div', { class: 'modal-hint' },
+        `${data.totals.users} users · ${data.totals.used} credits used · ${data.totals.credits} remaining. Costs: image 1 · 3D 3 · video 5.`));
+    }
+    // invite row
+    const inv = el('div', { class: 'admin-invite' });
+    const iemail = el('input', { type: 'email', placeholder: 'invite email…' });
+    const iname = el('input', { type: 'text', placeholder: 'name (optional)' });
+    const icred = el('input', { type: 'number', value: '500', title: 'starting credits' });
+    const ibtn = el('button', { class: 'primary' }, '＋ Invite');
+    ibtn.addEventListener('click', async () => {
+      if (!iemail.value.trim()) return;
+      await fetch('/api/admin/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: iemail.value.trim(), name: iname.value.trim(), credits: Number(icred.value) || 0 }) });
+      render();
+    });
+    inv.append(iemail, iname, icred, ibtn);
+    body.appendChild(inv);
+    // user table
+    const table = el('div', { class: 'admin-table' });
+    for (const u of (data.users || [])) {
+      const row = el('div', { class: 'admin-row' });
+      const info = el('div', { class: 'ar-info' });
+      info.appendChild(el('b', {}, u.name || '—'));
+      info.appendChild(el('span', {}, u.email));
+      row.appendChild(info);
+      const role = el('button', { class: 'ar-role' + (u.role === 'admin' ? ' on' : '') }, u.role);
+      role.addEventListener('click', async () => {
+        const r = await fetch('/api/admin/user/' + u.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: u.role === 'admin' ? 'member' : 'admin' }) });
+        const d = await r.json(); if (!r.ok) toast(d.error || 'failed', 'error'); render();
+      });
+      row.appendChild(role);
+      const cred = el('input', { type: 'number', value: u.credits, class: 'ar-cred' });
+      const setc = el('button', {}, 'Set');
+      setc.addEventListener('click', async () => {
+        await fetch('/api/admin/user/' + u.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credits: Number(cred.value) || 0 }) });
+        render();
+      });
+      const credWrap = el('div', { class: 'ar-credwrap' }); credWrap.append(cred, setc);
+      row.appendChild(credWrap);
+      row.appendChild(el('div', { class: 'ar-used' }, `used ${u.used}`));
+      const del = el('button', { class: 'ar-del danger', title: 'Remove user' }, '✕');
+      del.addEventListener('click', async () => {
+        const r = await fetch('/api/admin/user/' + u.id, { method: 'DELETE' });
+        const d = await r.json(); if (!r.ok) { toast(d.error || 'failed', 'error'); return; } render();
+      });
+      row.appendChild(del);
+      table.appendChild(row);
+    }
+    body.appendChild(table);
+  };
+  render();
 }
 document.getElementById('btn-account').addEventListener('click', (e) => { e.stopPropagation(); openAccountMenu(); });
 document.addEventListener('pointerdown', (e) => {

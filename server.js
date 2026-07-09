@@ -653,6 +653,52 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(302, { Location: '/' }); return res.end();
     }
 
+    // ---- admin portal API (admins only) ----
+    if (urlPath.startsWith('/api/admin/')) {
+      const me = await getUser(uid);
+      if (!me || me.role !== 'admin') return json(res, 403, { error: 'Admins only' });
+      const a = await getAccounts();
+      const adminCount = () => Object.values(a.users).filter(x => x.role === 'admin').length;
+      if (urlPath === '/api/admin/users' && req.method === 'GET') {
+        const users = Object.values(a.users).map(u => ({
+          id: u.id, email: u.email, name: u.name, role: u.role,
+          credits: u.credits || 0, used: u.used || 0, createdAt: u.createdAt, lastActive: u.lastActive || null,
+        })).sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0));
+        const totals = { users: users.length, used: users.reduce((s, u) => s + u.used, 0), credits: users.reduce((s, u) => s + u.credits, 0) };
+        return json(res, 200, { users, totals });
+      }
+      if (urlPath === '/api/admin/invite' && req.method === 'POST') {
+        const { email, name, credits } = await readBody(req);
+        if (!email) return json(res, 400, { error: 'email required' });
+        const u = await findOrCreateUser({ email, name });
+        if (typeof credits === 'number') { const a2 = await getAccounts(); a2.users[u.id].credits = Math.max(0, credits | 0); await saveAccounts(a2); }
+        return json(res, 200, { ok: true });
+      }
+      const um = /^\/api\/admin\/user\/([\w-]+)$/.exec(urlPath);
+      if (um) {
+        const t = a.users[um[1]];
+        if (!t) return json(res, 404, { error: 'not found' });
+        if (req.method === 'POST') {
+          const b = await readBody(req);
+          if (typeof b.credits === 'number') t.credits = Math.max(0, b.credits | 0);
+          if (typeof b.addCredits === 'number') t.credits = Math.max(0, (t.credits || 0) + (b.addCredits | 0));
+          if (b.role === 'admin' || b.role === 'member') {
+            if (b.role === 'member' && t.role === 'admin' && adminCount() <= 1) return json(res, 400, { error: 'Cannot demote the last admin' });
+            t.role = b.role;
+          }
+          await saveAccounts(a);
+          return json(res, 200, { ok: true });
+        }
+        if (req.method === 'DELETE') {
+          if (t.role === 'admin' && adminCount() <= 1) return json(res, 400, { error: 'Cannot delete the last admin' });
+          delete a.byEmail[t.email]; delete a.users[um[1]];
+          await saveAccounts(a);
+          return json(res, 200, { ok: true });
+        }
+      }
+      return json(res, 404, { error: 'unknown admin route' });
+    }
+
     // ---- gate everything else behind a session ----
     const publicStatic = urlPath === '/login.html' || urlPath.startsWith('/director') ||
       /\.(css|js|mjs|svg|png|jpe?g|webp|gif|ico|glb|gltf|bin|wasm|woff2?|ttf|map)$/i.test(urlPath);

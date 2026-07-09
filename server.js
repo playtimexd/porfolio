@@ -164,7 +164,7 @@ const DEFAULT_CREDITS = Number(process.env.DEFAULT_CREDITS || 500);
 // credit cost per generation, varied by quality (image/3D) and duration×quality (video)
 function creditCost(kind, inputs = {}) {
   if (kind === 'image') return inputs.quality === 'ultra' ? 4 : inputs.quality === 'high' ? 2 : 1;
-  if (kind === 'video') { const d = Number(inputs.duration) || 5; return Math.max(1, Math.round(d * (inputs.quality === '1080p' ? 1.5 : 1))); }
+  if (kind === 'video') { const d = Number(inputs.duration) || 5; const mult = { '480p': 0.5, '720p': 1, '1080p': 1.5, '4k': 3 }[inputs.quality] ?? 1; return Math.max(1, Math.round(d * mult)); }
   if (kind === 'threed') return inputs.quality === 'textured' ? 6 : 3;
   if (kind === 'llm') return 0;
   return 1;
@@ -270,7 +270,7 @@ function parseRatio(aspect) {
   return m ? { str: r, w: +m[1], h: +m[2] } : null;
 }
 function videoRes(quality) {
-  return ['high', 'ultra', '1080p'].includes(quality) ? '1080p' : '720p';
+  return { '480p': '480p', '720p': '720p', '1080p': '1080p', '4k': '4K', high: '1080p', ultra: '1080p' }[quality] || '720p';
 }
 
 // normalize single `image` / multi `images` inputs to an array (max 9)

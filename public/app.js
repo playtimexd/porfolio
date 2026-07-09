@@ -40,7 +40,7 @@ const RATIO_OPTS = [
 ];
 const VIDEO_RATIO_OPTS = [['16:9', '16:9'], ['21:9', '21:9'], ['4:3', '4:3'], ['1:1', '1:1'], ['3:4', '3:4'], ['9:16', '9:16']];
 const QUALITY_OPTS = [['auto', 'Auto'], ['standard', 'Standard (1K)'], ['high', 'High (2K)'], ['ultra', 'Ultra (4K)']];
-const VIDEO_QUALITY_OPTS = [['auto', 'Auto'], ['720p', '720p'], ['1080p', '1080p']];
+const VIDEO_QUALITY_OPTS = [['480p', '480p'], ['720p', '720p'], ['1080p', '1080p'], ['4k', '4K']];
 // old projects stored square/landscape/portrait — upgrade in place
 function normRatio(node, key) {
   const legacy = { square: '1:1', landscape: '3:2', portrait: '2:3' };
@@ -138,7 +138,7 @@ const NODE_TYPES = {
     title: 'Video', color: '#ff9e64', desc: 'prompt → video',
     inputs: refInputs,
     outputs: [{ name: 'video', type: 'video' }],
-    defaults: () => ({ model: '', duration: '5', ratio: '16:9', quality: 'auto', refCount: 1 }),
+    defaults: () => ({ model: '', duration: '5', ratio: '16:9', quality: '720p', refCount: 1 }),
     sub: (n) => modelLabel(n.data.model),
     media(node) {
       if (node.out.media) return mediaEl(node.out.media);
@@ -149,14 +149,14 @@ const NODE_TYPES = {
       box.appendChild(el('label', {}, 'Model'));
       box.appendChild(modelSelect(node, 'video'));
       const row = el('div', { class: 'row' });
-      const c1 = el('div'); c1.appendChild(el('label', {}, 'Duration')); const dsel = selectCtl(node, 'duration', [['4', '4s'], ['5', '5s'], ['8', '8s'], ['10', '10s']]); c1.appendChild(dsel);
+      const c1 = el('div'); c1.appendChild(el('label', {}, 'Duration')); const dsel = selectCtl(node, 'duration', [['4', '4s'], ['5', '5s'], ['6', '6s'], ['8', '8s'], ['10', '10s'], ['12', '12s'], ['15', '15s']]); c1.appendChild(dsel);
       const c2 = el('div'); c2.appendChild(el('label', {}, 'Ratio')); c2.appendChild(selectCtl(node, 'ratio', VIDEO_RATIO_OPTS));
       const c3 = el('div'); c3.appendChild(el('label', {}, 'Quality')); const qsel = selectCtl(node, 'quality', VIDEO_QUALITY_OPTS); c3.appendChild(qsel);
       row.appendChild(c1); row.appendChild(c2); row.appendChild(c3);
       box.appendChild(row);
       box.appendChild(el('div', { class: 'mini-hint' }, '1080p-class output needs Sora 2 Pro or Seedance; Sora 2 runs at 720p.'));
       const cost = el('div', { class: 'cost-line' });
-      const upd = () => { const c = creditCostClient('video', node.data); cost.textContent = `⚡ ${c} credits per video (${node.data.duration}s${node.data.quality === '1080p' ? ' · 1080p' : ''})`; };
+      const upd = () => { const c = creditCostClient('video', node.data); cost.textContent = `⚡ ${c} credits per video (${node.data.duration}s · ${node.data.quality})`; };
       dsel.addEventListener('change', upd); qsel.addEventListener('change', upd); upd();
       box.appendChild(cost);
       actionRow(node, box);
@@ -261,7 +261,7 @@ function modelLabel(id) {
 function creditCostClient(kind, d) {
   d = d || {};
   if (kind === 'image') return d.quality === 'ultra' ? 4 : d.quality === 'high' ? 2 : 1;
-  if (kind === 'video') { const dur = Number(d.duration) || 5; return Math.max(1, Math.round(dur * (d.quality === '1080p' ? 1.5 : 1))); }
+  if (kind === 'video') { const dur = Number(d.duration) || 5; const mult = { '480p': 0.5, '720p': 1, '1080p': 1.5, '4k': 3 }[d.quality] ?? 1; return Math.max(1, Math.round(dur * mult)); }
   if (kind === 'threed') return d.quality === 'textured' ? 6 : 3;
   return 1;
 }

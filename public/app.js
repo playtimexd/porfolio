@@ -1744,7 +1744,7 @@ function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(doSaveNow, 400);
   recordHistory();
-  if (collabActive() && !collab.applying) collabSendGraph();
+  if (collabActive() && !collab.applying) { if (collab.crdt) crdtPushLocal(); else collabSendGraph(); }
 }
 
 // ---- Undo / Redo (canvas graph only; chat is left untouched) ----
@@ -2486,6 +2486,8 @@ function collabActive() { return collab.ws && collab.ws.readyState === 1; }
 function connectCollab(roomId) {
   if (collab.ws) { try { collab.ws.close(); } catch {} }
   collab.room = roomId;
+  // Experimental true-CRDT sync (Yjs) when opened with ?crdt=1 and the bundle loaded; else last-write-wins.
+  collab.crdt = !!(window.NovaY && new URLSearchParams(location.search).get('crdt'));
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/?room=${encodeURIComponent(roomId)}`);
   collab.ws = ws;
@@ -2493,12 +2495,51 @@ function connectCollab(roomId) {
   ws.addEventListener('close', () => { collab.ws = null; collab.peers.forEach(c => c.remove()); collab.peers.clear(); renderPresence(); });
   ws.addEventListener('message', (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
-    if (m.t === 'init') { collab.you = m.you; if (m.graph && m.graph.nodes) applyRemoteGraph(m.graph); else collabSendGraph(true); }
-    else if (m.t === 'roster') { collab.roster = m.roster || []; renderPresence(); }
+    if (m.t === 'init') {
+      collab.you = m.you;
+      if (collab.crdt) crdtInit(m.graph);
+      else if (m.graph && m.graph.nodes) applyRemoteGraph(m.graph);
+      else collabSendGraph(true);
+    }
+    else if (m.t === 'roster') {
+      collab.roster = m.roster || []; renderPresence();
+      if (collab.crdt && collab.ydoc && collabActive()) collab.ws.send(JSON.stringify({ t: 'yupdate', u: u8ToB64(window.NovaY.encodeStateAsUpdate(collab.ydoc)) }));
+    }
     else if (m.t === 'cursor') showPeerCursor(m);
-    else if (m.t === 'graph') { if (m.graph) applyRemoteGraph(m.graph); }
+    else if (m.t === 'yupdate') { if (collab.crdt && collab.ydoc) crdtApplyRemote(m.u); }
+    else if (m.t === 'graph') { if (!collab.crdt && m.graph) applyRemoteGraph(m.graph); }
     else if (m.t === 'left') removePeerCursor(m.id);
   });
+}
+
+// ---- Yjs CRDT helpers (per-node/per-edge conflict-free merge) ----
+function u8ToB64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+function b64ToU8(b64) { const bin = atob(b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; }
+function crdtInit(seed) {
+  collab.ydoc = window.NovaY.Doc();
+  collab.ynodes = collab.ydoc.getMap('nodes');
+  collab.yedges = collab.ydoc.getMap('edges');
+  if (seed && collab.ynodes.size === 0 && (seed.nodes || []).length) {
+    collab.ydoc.transact(() => { for (const n of seed.nodes) collab.ynodes.set(n.id, n); for (const e of (seed.edges || [])) collab.yedges.set(e.id, e); }, 'local');
+  }
+  collab.ydoc.on('update', (update, origin) => { if (origin !== 'remote' && collabActive()) collab.ws.send(JSON.stringify({ t: 'yupdate', u: u8ToB64(update) })); });
+  const rebuild = (events, txn) => { if (txn && txn.origin === 'local') return; renderFromY(); };
+  collab.ynodes.observeDeep(rebuild); collab.yedges.observeDeep(rebuild);
+  renderFromY();
+}
+function renderFromY() { applyRemoteGraph({ idCounter, nodes: [...collab.ynodes.values()], edges: [...collab.yedges.values()] }); }
+function crdtApplyRemote(b64) { try { window.NovaY.applyUpdate(collab.ydoc, b64ToU8(b64), 'remote'); } catch {} }
+function crdtPushLocal() {
+  if (!collab.ydoc) return;
+  collab.ydoc.transact(() => {
+    const g = serializeGraph();
+    const nids = new Set(g.nodes.map(n => n.id));
+    for (const n of g.nodes) { if (JSON.stringify(collab.ynodes.get(n.id)) !== JSON.stringify(n)) collab.ynodes.set(n.id, n); }
+    for (const k of [...collab.ynodes.keys()]) if (!nids.has(k)) collab.ynodes.delete(k);
+    const eids = new Set(g.edges.map(e => e.id));
+    for (const e of g.edges) { if (JSON.stringify(collab.yedges.get(e.id)) !== JSON.stringify(e)) collab.yedges.set(e.id, e); }
+    for (const k of [...collab.yedges.keys()]) if (!eids.has(k)) collab.yedges.delete(k);
+  }, 'local');
 }
 
 function applyRemoteGraph(graph) {

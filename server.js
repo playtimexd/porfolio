@@ -872,6 +872,7 @@ server.on('upgrade', async (req, sock) => {
         if (op !== 0x1) continue;                        // only text frames
         let msg; try { msg = JSON.parse(payload.toString()); } catch { continue; }
         if (msg.t === 'cursor') { client.cursor = { x: msg.x, y: msg.y }; broadcast({ t: 'cursor', id: uid, name: client.name, color: client.color, x: msg.x, y: msg.y }, client); }
+        else if (msg.t === 'yupdate') { broadcast({ t: 'yupdate', u: msg.u }, client); } // CRDT (Yjs) update relay
         else if (msg.t === 'graph') {
           room.graph = msg.graph;
           broadcast({ t: 'graph', graph: msg.graph, from: uid }, client);

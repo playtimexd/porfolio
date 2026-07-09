@@ -4,7 +4,8 @@
   "description": "Nova — a node-based multi-model AI creative canvas (Behaviour Interactive · NASA). Canvas pipelines, agent chat, 3D previs; Nano Banana/Gemini/GPT/Sora/Seedance/Meshy.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "esbuild src/crdt.js --bundle --format=iife --outfile=public/vendor/nova-crdt.js --minify"
   },
   "engines": {
     "node": ">=18"
@@ -12,7 +13,10 @@
   "dependencies": {
     "pg": "^8.13.0"
   },
-  "optionalDependencies": {},
   "comments": "pg is only used when DATABASE_URL is set (Behaviour internal Postgres). Dev runs on the local file store with no DB.",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "yjs": "^13.6.31"
+  }
 }

@@ -190,9 +190,20 @@ function parseCookies(req) {
 function setSessionCookie(res, token) { res.setHeader('Set-Cookie', `nova_session=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${SESSION_TTL / 1000}; SameSite=Lax`); }
 function clearSessionCookie(res) { res.setHeader('Set-Cookie', 'nova_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax'); }
 
-async function getAccounts() { return (await store.get('accounts')) || { users: {}, byEmail: {} }; }
+async function getAccounts() {
+  const a = (await store.get('accounts')) || { users: {}, byEmail: {}, teams: {} };
+  if (!a.teams) a.teams = {};
+  let changed = false;
+  for (const u of Object.values(a.users)) { if (u.role === 'admin') { u.role = 'enterprise_admin'; changed = true; } if (u.teamId === undefined) { u.teamId = null; changed = true; } }
+  if (changed) await store.put('accounts', a);
+  return a;
+}
 async function saveAccounts(a) { await store.put('accounts', a); }
 async function getUser(uid) { return uid ? (await getAccounts()).users[uid] || null : null; }
+// role helpers (3 tiers): enterprise_admin > team_admin > member
+const isEnt = (u) => !!u && u.role === 'enterprise_admin';
+const isTeamAdmin = (u) => !!u && u.role === 'team_admin';
+const canAdmin = (u) => isEnt(u) || isTeamAdmin(u);
 async function findOrCreateUser({ email, name, role }) {
   const a = await getAccounts();
   email = (email || '').toLowerCase().trim();
@@ -203,13 +214,13 @@ async function findOrCreateUser({ email, name, role }) {
   }
   const uid = 'u' + crypto.randomBytes(6).toString('hex');
   const isFirst = Object.keys(a.users).length === 0;
-  a.users[uid] = { id: uid, email, name: name || email.split('@')[0] || 'User', role: role || (isFirst ? 'admin' : 'member'), credits: DEFAULT_CREDITS, used: 0, createdAt: Date.now() };
+  a.users[uid] = { id: uid, email, name: name || email.split('@')[0] || 'User', role: role || (isFirst ? 'enterprise_admin' : 'member'), teamId: null, credits: DEFAULT_CREDITS, used: 0, createdAt: Date.now() };
   a.byEmail[email] = uid;
   await saveAccounts(a);
   return a.users[uid];
 }
 async function currentUser(req) { return getUser(verifySession(parseCookies(req).nova_session)); }
-const publicUser = (u) => u && { id: u.id, email: u.email, name: u.name, role: u.role, credits: u.credits, used: u.used, settings: u.settings || {} };
+const publicUser = (u) => u && { id: u.id, email: u.email, name: u.name, role: u.role, teamId: u.teamId || null, credits: u.credits, used: u.used, settings: u.settings || {} };
 async function recordUsage(uid, kind, modelId) {
   const a = await getAccounts(); const u = a.users[uid]; if (!u) return;
   const cost = CREDIT_COST[kind] ?? 1;
@@ -678,44 +689,73 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(302, { Location: '/' }); return res.end();
     }
 
-    // ---- admin portal API (admins only) ----
+    // ---- admin portal API (enterprise + team admins; team admins scoped to their team) ----
     if (urlPath.startsWith('/api/admin/')) {
       const me = await getUser(uid);
-      if (!me || me.role !== 'admin') return json(res, 403, { error: 'Admins only' });
+      if (!canAdmin(me)) return json(res, 403, { error: 'Admins only' });
       const a = await getAccounts();
-      const adminCount = () => Object.values(a.users).filter(x => x.role === 'admin').length;
+      const ROLES = ['enterprise_admin', 'team_admin', 'member'];
+      const entCount = () => Object.values(a.users).filter(x => x.role === 'enterprise_admin').length;
+      const teamName = (id) => (a.teams[id] && a.teams[id].name) || null;
+      const visible = (u) => isEnt(me) || (!!me.teamId && u.teamId === me.teamId);
+
       if (urlPath === '/api/admin/users' && req.method === 'GET') {
-        const users = Object.values(a.users).map(u => ({
-          id: u.id, email: u.email, name: u.name, role: u.role,
+        const users = Object.values(a.users).filter(visible).map(u => ({
+          id: u.id, email: u.email, name: u.name, role: u.role, teamId: u.teamId || null, team: teamName(u.teamId),
           credits: u.credits || 0, used: u.used || 0, createdAt: u.createdAt, lastActive: u.lastActive || null,
         })).sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0));
         const totals = { users: users.length, used: users.reduce((s, u) => s + u.used, 0), credits: users.reduce((s, u) => s + u.credits, 0) };
-        return json(res, 200, { users, totals });
+        return json(res, 200, { users, totals, teams: Object.values(a.teams), me: { role: me.role, teamId: me.teamId || null } });
+      }
+      if (urlPath === '/api/admin/teams') {
+        if (req.method === 'GET') return json(res, 200, { teams: Object.values(a.teams) });
+        if (req.method === 'POST') {
+          if (!isEnt(me)) return json(res, 403, { error: 'Only an enterprise admin can create teams' });
+          const { name } = await readBody(req);
+          if (!name) return json(res, 400, { error: 'name required' });
+          const tid = 't' + crypto.randomBytes(4).toString('hex');
+          a.teams[tid] = { id: tid, name: String(name).slice(0, 60) };
+          await saveAccounts(a);
+          return json(res, 200, { team: a.teams[tid] });
+        }
       }
       if (urlPath === '/api/admin/invite' && req.method === 'POST') {
-        const { email, name, credits } = await readBody(req);
-        if (!email) return json(res, 400, { error: 'email required' });
-        const u = await findOrCreateUser({ email, name });
-        if (typeof credits === 'number') { const a2 = await getAccounts(); a2.users[u.id].credits = Math.max(0, credits | 0); await saveAccounts(a2); }
+        const b = await readBody(req);
+        if (!b.email) return json(res, 400, { error: 'email required' });
+        const u = await findOrCreateUser({ email: b.email, name: b.name });
+        const a2 = await getAccounts(); const nu = a2.users[u.id];
+        if (typeof b.credits === 'number') nu.credits = Math.max(0, b.credits | 0);
+        if (isEnt(me)) {
+          if (ROLES.includes(b.role)) nu.role = b.role;
+          if (b.teamId !== undefined) nu.teamId = b.teamId || null;
+        } else { nu.teamId = me.teamId; nu.role = 'member'; } // team admin: into own team as member
+        await saveAccounts(a2);
         return json(res, 200, { ok: true });
       }
       const um = /^\/api\/admin\/user\/([\w-]+)$/.exec(urlPath);
       if (um) {
         const t = a.users[um[1]];
         if (!t) return json(res, 404, { error: 'not found' });
+        if (!visible(t)) return json(res, 403, { error: 'Not in your team' });
         if (req.method === 'POST') {
           const b = await readBody(req);
           if (typeof b.credits === 'number') t.credits = Math.max(0, b.credits | 0);
           if (typeof b.addCredits === 'number') t.credits = Math.max(0, (t.credits || 0) + (b.addCredits | 0));
-          if (b.role === 'admin' || b.role === 'member') {
-            if (b.role === 'member' && t.role === 'admin' && adminCount() <= 1) return json(res, 400, { error: 'Cannot demote the last admin' });
-            t.role = b.role;
+          if (b.teamId !== undefined && isEnt(me)) t.teamId = b.teamId || null;
+          if (b.role) {
+            if (isEnt(me) && ROLES.includes(b.role)) {
+              if (t.role === 'enterprise_admin' && b.role !== 'enterprise_admin' && entCount() <= 1) return json(res, 400, { error: 'Cannot demote the last enterprise admin' });
+              t.role = b.role;
+            } else if (isTeamAdmin(me) && (b.role === 'member' || b.role === 'team_admin')) {
+              t.role = b.role; // team admin can promote/demote within their team (not to enterprise)
+            }
           }
           await saveAccounts(a);
           return json(res, 200, { ok: true });
         }
         if (req.method === 'DELETE') {
-          if (t.role === 'admin' && adminCount() <= 1) return json(res, 400, { error: 'Cannot delete the last admin' });
+          if (t.role === 'enterprise_admin' && entCount() <= 1) return json(res, 400, { error: 'Cannot delete the last enterprise admin' });
+          if (t.id === me.id) return json(res, 400, { error: 'You cannot remove yourself' });
           delete a.byEmail[t.email]; delete a.users[um[1]];
           await saveAccounts(a);
           return json(res, 200, { ok: true });

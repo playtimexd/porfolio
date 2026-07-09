@@ -1264,7 +1264,7 @@ function applyTransform() {
 }
 let panning = false, lastX = 0, lastY = 0;
 viewport.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('.node')) return;
+  if (e.target.closest('.node') || e.target.closest('#empty-hint') || e.target.closest('button, a, input, select, textarea')) return;
   panning = true;
   lastX = e.clientX; lastY = e.clientY;
   viewport.classList.add('panning');
@@ -1843,9 +1843,10 @@ function loadGraph(data) {
   return true;
 }
 
+let hintDismissed = false;
 function updateEmptyHint() {
   const h = document.getElementById('empty-hint');
-  if (h) h.hidden = nodes.size > 0;
+  if (h) h.hidden = nodes.size > 0 || hintDismissed;
 }
 
 function link(a, ap, b, bp) {
@@ -1858,6 +1859,7 @@ function link(a, ap, b, bp) {
 }
 
 function openProject(id, opts = {}) {
+  hintDismissed = false;
   if (!opts.skipSaveCurrent) doSaveNow();
   projects.current = id;
   saveProjectsMeta();
@@ -1874,6 +1876,7 @@ function openProject(id, opts = {}) {
 }
 
 function createProject(name, build, opts = {}) {
+  hintDismissed = false;
   if (!opts.skipSaveCurrent) doSaveNow();
   const id = newProjectId();
   projects.list.push({ id, name, updatedAt: Date.now() });
@@ -1905,6 +1908,7 @@ document.getElementById('btn-new-project').addEventListener('click', () => {
 });
 document.getElementById('hint-templates').addEventListener('click', () => document.getElementById('btn-templates').click());
 document.getElementById('hint-chat').addEventListener('click', () => document.getElementById('btn-chat').click());
+document.getElementById('hint-blank').addEventListener('click', () => { hintDismissed = true; updateEmptyHint(); });
 document.getElementById('btn-rename-project').addEventListener('click', () => {
   const meta = projects.list.find(p => p.id === projects.current);
   if (!meta) return;

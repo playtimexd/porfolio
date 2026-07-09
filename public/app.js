@@ -1744,6 +1744,7 @@ function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(doSaveNow, 400);
   recordHistory();
+  if (collabActive() && !collab.applying) collabSendGraph();
 }
 
 // ---- Undo / Redo (canvas graph only; chat is left untouched) ----
@@ -2478,6 +2479,89 @@ document.addEventListener('pointerdown', (e) => {
   if (m && !e.target.closest('#account-menu') && !e.target.closest('#btn-account')) m.remove();
 });
 
+// Live collaboration ----------------------------------------------------
+const collab = { ws: null, room: null, you: null, roster: [], peers: new Map(), applying: false, sendTimer: null, cursorAt: 0 };
+function collabActive() { return collab.ws && collab.ws.readyState === 1; }
+
+function connectCollab(roomId) {
+  if (collab.ws) { try { collab.ws.close(); } catch {} }
+  collab.room = roomId;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/?room=${encodeURIComponent(roomId)}`);
+  collab.ws = ws;
+  ws.addEventListener('open', renderPresence);
+  ws.addEventListener('close', () => { collab.ws = null; collab.peers.forEach(c => c.remove()); collab.peers.clear(); renderPresence(); });
+  ws.addEventListener('message', (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.t === 'init') { collab.you = m.you; if (m.graph && m.graph.nodes) applyRemoteGraph(m.graph); else collabSendGraph(true); }
+    else if (m.t === 'roster') { collab.roster = m.roster || []; renderPresence(); }
+    else if (m.t === 'cursor') showPeerCursor(m);
+    else if (m.t === 'graph') { if (m.graph) applyRemoteGraph(m.graph); }
+    else if (m.t === 'left') removePeerCursor(m.id);
+  });
+}
+
+function applyRemoteGraph(graph) {
+  collab.applying = true; suspendSave = true; suspendHistory = true;
+  const chat = chatHistory;
+  clearCanvas(); chatHistory = chat;
+  idCounter = Math.max(idCounter, graph.idCounter || 1);
+  for (const n of graph.nodes || []) if (NODE_TYPES[n.type]) addNode(n.type, n.x, n.y, n.data, n.id);
+  edges = (graph.edges || []).filter(e => nodes.has(e.from.node) && nodes.has(e.to.node));
+  redrawEdges(); drawMinimap(); updateEmptyHint();
+  suspendSave = false; suspendHistory = false; collab.applying = false;
+}
+function collabSendGraph(immediate) {
+  if (!collabActive() || collab.applying) return;
+  clearTimeout(collab.sendTimer);
+  const doSend = () => { if (collabActive()) try { collab.ws.send(JSON.stringify({ t: 'graph', graph: serializeGraph() })); } catch {} };
+  if (immediate) doSend(); else collab.sendTimer = setTimeout(doSend, 300);
+}
+
+function renderPresence() {
+  let p = document.getElementById('presence');
+  if (!p) { p = el('div', { id: 'presence' }); document.body.appendChild(p); }
+  p.innerHTML = '';
+  if (!collabActive()) { p.hidden = true; return; }
+  p.hidden = false;
+  p.appendChild(el('span', { class: 'pres-tag' }, '● live'));
+  for (const u of collab.roster) {
+    const a = el('div', { class: 'pres-av', title: u.name });
+    a.style.background = u.color; a.textContent = (u.name || '?').slice(0, 1).toUpperCase();
+    p.appendChild(a);
+  }
+}
+function peerCursorLayer() { let l = document.getElementById('cursor-layer'); if (!l) { l = el('div', { id: 'cursor-layer' }); document.body.appendChild(l); } return l; }
+function showPeerCursor(m) {
+  let c = collab.peers.get(m.id);
+  if (!c) {
+    c = el('div', { class: 'peer-cursor' });
+    c.innerHTML = '<svg width="18" height="18" viewBox="0 0 18 18"><path d="M2 1 L2 15 L6 11 L9 17 L12 16 L9 10 L15 10 Z"/></svg><span></span>';
+    peerCursorLayer().appendChild(c); collab.peers.set(m.id, c);
+  }
+  c.querySelector('path').setAttribute('fill', m.color);
+  const sp = c.querySelector('span'); sp.textContent = m.name; sp.style.background = m.color;
+  const vr = viewport.getBoundingClientRect();
+  c.style.left = (m.x * zoom + panX + vr.left) + 'px';
+  c.style.top = (m.y * zoom + panY + vr.top) + 'px';
+}
+function removePeerCursor(id) { const c = collab.peers.get(id); if (c) { c.remove(); collab.peers.delete(id); } }
+
+viewport.addEventListener('mousemove', (e) => {
+  if (!collabActive()) return;
+  const now = Date.now(); if (now - collab.cursorAt < 45) return; collab.cursorAt = now;
+  const vr = viewport.getBoundingClientRect();
+  try { collab.ws.send(JSON.stringify({ t: 'cursor', x: (e.clientX - vr.left - panX) / zoom, y: (e.clientY - vr.top - panY) / zoom })); } catch {}
+});
+document.getElementById('btn-share').addEventListener('click', () => {
+  const id = projects.current;
+  if (!id) { toast('Open a project first'); return; }
+  const link = location.origin + '/canvas.html?room=' + encodeURIComponent(id);
+  if (!collabActive()) connectCollab(id);
+  if (navigator.clipboard) navigator.clipboard.writeText(link).then(() => toast('Live — share link copied to clipboard')).catch(() => toast('Live collaboration on'));
+  else toast('Live collaboration on');
+});
+
 // Init -----------------------------------------------------------------
 (async function init() {
   await initAccount();
@@ -2506,6 +2590,7 @@ document.addEventListener('pointerdown', (e) => {
   const params = new URLSearchParams(location.search);
   const wantProject = params.get('project');
   const wantTemplate = params.get('template');
+  const wantRoom = params.get('room');
   if (wantTemplate !== null && TEMPLATES[Number(wantTemplate)]) {
     const t = TEMPLATES[Number(wantTemplate)];
     createProject(t.name, () => t.build(), { skipSaveCurrent: true });
@@ -2516,5 +2601,6 @@ document.addEventListener('pointerdown', (e) => {
   } else {
     openProject(projects.current, { skipSaveCurrent: true });
   }
+  if (wantRoom) connectCollab(wantRoom); // joining a shared live session
   if (location.search) history.replaceState({}, '', 'canvas.html');
 })();

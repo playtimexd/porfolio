@@ -785,6 +785,82 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// =====================================================================
+// REAL-TIME COLLABORATION — minimal RFC6455 WebSocket server (no deps).
+// Rooms are keyed by a project's share id. Presence + live cursors +
+// last-write-wins graph sync; the room's graph persists to `shared-<id>`.
+// =====================================================================
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+const COLLAB_COLORS = ['#19c6d6', '#ff8a5c', '#a78bfa', '#5eead4', '#f0c542', '#f472b6', '#4ade80', '#60a5fa'];
+const rooms = new Map(); // roomId -> { graph, name, clients:Set, saveTimer }
+function roomOf(id) { if (!rooms.has(id)) rooms.set(id, { graph: null, name: 'Shared project', clients: new Set(), saveTimer: null }); return rooms.get(id); }
+
+function wsEncode(str) {
+  const payload = Buffer.from(str);
+  const len = payload.length;
+  let header;
+  if (len < 126) { header = Buffer.from([0x81, len]); }
+  else if (len < 65536) { header = Buffer.alloc(4); header[0] = 0x81; header[1] = 126; header.writeUInt16BE(len, 2); }
+  else { header = Buffer.alloc(10); header[0] = 0x81; header[1] = 127; header.writeUInt32BE(0, 2); header.writeUInt32BE(len, 6); }
+  return Buffer.concat([header, payload]);
+}
+function wsSend(sock, obj) { try { sock.write(wsEncode(JSON.stringify(obj))); } catch { /* closed */ } }
+
+server.on('upgrade', async (req, sock) => {
+  try {
+    const key = req.headers['sec-websocket-key'];
+    const uid = verifySession(parseCookies(req).nova_session);
+    const roomId = new URL(req.url, 'http://localhost').searchParams.get('room');
+    if (!key || !uid || !roomId) { sock.destroy(); return; }
+    const accept = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
+    sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
+
+    const user = await getUser(uid);
+    const room = roomOf(roomId);
+    if (room.graph === null) { const saved = await store.get('shared-' + roomId); if (saved) { room.graph = saved.graph; room.name = saved.name || room.name; } }
+    const client = { sock, uid, name: user?.name || 'User', color: COLLAB_COLORS[room.clients.size % COLLAB_COLORS.length], cursor: null };
+    room.clients.add(client);
+
+    const roster = () => [...room.clients].map(c => ({ id: c.uid, name: c.name, color: c.color }));
+    const broadcast = (obj, except) => { for (const c of room.clients) if (c !== except) wsSend(c.sock, obj); };
+
+    wsSend(sock, { t: 'init', graph: room.graph, you: { id: uid, name: client.name, color: client.color } });
+    broadcast({ t: 'roster', roster: roster() });
+
+    let buf = Buffer.alloc(0);
+    sock.on('data', (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      while (buf.length >= 2) {
+        const op = buf[0] & 0x0f;
+        const masked = (buf[1] & 0x80) !== 0;
+        let len = buf[1] & 0x7f, off = 2;
+        if (len === 126) { if (buf.length < 4) break; len = buf.readUInt16BE(2); off = 4; }
+        else if (len === 127) { if (buf.length < 10) break; len = buf.readUInt32BE(6); off = 10; }
+        const need = off + (masked ? 4 : 0) + len;
+        if (buf.length < need) break;
+        let payload;
+        if (masked) { const mask = buf.slice(off, off + 4); payload = buf.slice(off + 4, off + 4 + len); for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3]; }
+        else payload = buf.slice(off, off + len);
+        buf = buf.slice(need);
+        if (op === 0x8) { sock.end(); return; }        // close
+        if (op === 0x9) { sock.write(Buffer.from([0x8a, 0])); continue; } // ping -> pong
+        if (op !== 0x1) continue;                        // only text frames
+        let msg; try { msg = JSON.parse(payload.toString()); } catch { continue; }
+        if (msg.t === 'cursor') { client.cursor = { x: msg.x, y: msg.y }; broadcast({ t: 'cursor', id: uid, name: client.name, color: client.color, x: msg.x, y: msg.y }, client); }
+        else if (msg.t === 'graph') {
+          room.graph = msg.graph;
+          broadcast({ t: 'graph', graph: msg.graph, from: uid }, client);
+          clearTimeout(room.saveTimer);
+          room.saveTimer = setTimeout(() => store.put('shared-' + roomId, { graph: room.graph, name: room.name, updatedAt: Date.now() }).catch(() => {}), 800);
+        }
+      }
+    });
+    const bye = () => { room.clients.delete(client); broadcast({ t: 'roster', roster: roster() }); broadcast({ t: 'left', id: uid }); if (!room.clients.size) { /* keep graph persisted */ } };
+    sock.on('close', bye);
+    sock.on('error', bye);
+  } catch { try { sock.destroy(); } catch {} }
+});
+
 server.listen(PORT, () => {
   console.log(`Nova (Behaviour NASA) → http://localhost:${PORT}`);
   console.log('Providers configured:', Object.entries(KEYS).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none');

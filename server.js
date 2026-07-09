@@ -19,7 +19,6 @@ const KEYS = {
   anthropic: process.env.ANTHROPIC_API_KEY || '',
   gemini: process.env.GEMINI_API_KEY || '',
   seedance: process.env.SEEDANCE_API_KEY || '',
-  meshy: process.env.MESHY_API_KEY || '',
 };
 const ARK_BASE = process.env.ARK_BASE_URL || 'https://ark.ap-southeast.bytepluses.com/api/v3';
 
@@ -47,8 +46,6 @@ const MODELS = [
   { id: 'gemini-3.1-flash-image',               label: 'Nano Banana 2',       provider: 'gemini',   kind: 'image' },
   // Seedance via BytePlus ModelArk — set SEEDANCE_MODEL to the exact id from your console
   { id: process.env.SEEDANCE_MODEL || 'seedance-2-0', label: 'Seedance', provider: 'seedance', kind: 'video' },
-  // Meshy — text-to-3D / image-to-3D
-  { id: 'meshy-3d', label: 'Meshy 3D', provider: 'meshy', kind: 'threed' },
 ];
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -161,11 +158,10 @@ const crypto = require('crypto');
 const AUTH_MODE = (process.env.AUTH_MODE || 'dev').toLowerCase(); // 'dev' | 'azure'
 const SESSION_TTL = 30 * 24 * 3600 * 1000; // 30 days (ms)
 const DEFAULT_CREDITS = Number(process.env.DEFAULT_CREDITS || 500);
-// credit cost per generation, varied by quality (image/3D) and duration×quality (video)
+// credit cost per generation, varied by quality (image) and duration×quality (video)
 function creditCost(kind, inputs = {}) {
   if (kind === 'image') return inputs.quality === 'ultra' ? 4 : inputs.quality === 'high' ? 2 : 1;
   if (kind === 'video') { const d = Number(inputs.duration) || 5; const mult = { '480p': 0.5, '720p': 1, '1080p': 1.5, '4k': 3 }[inputs.quality] ?? 1; return Math.max(1, Math.round(d * mult)); }
-  if (kind === 'threed') return inputs.quality === 'textured' ? 6 : 3;
   if (kind === 'llm') return 0;
   return 1;
 }
@@ -571,73 +567,6 @@ const providers = {
     },
   },
 
-  // ---------------- Meshy (text/image → 3D) ----------------
-  meshy: {
-    headers() {
-      return { 'Authorization': `Bearer ${KEYS.meshy}`, 'Content-Type': 'application/json' };
-    },
-    async poll(base, id) {
-      for (let i = 0; i < 240; i++) {
-        await sleep(5000);
-        const st = await jsonFetch(`${base}/${id}`, { headers: this.headers() });
-        if (st.status === 'SUCCEEDED') return st;
-        if (st.status === 'FAILED' || st.status === 'CANCELED') {
-          throw apiError(st.task_error?.message || `Meshy task ${st.status.toLowerCase()}`);
-        }
-      }
-      throw apiError('Meshy generation timed out');
-    },
-    async threed(model, { prompt, image, artStyle, quality, format, pbr, hd, texturePrompt }) {
-      const wantTexture = quality !== 'preview';
-      const enablePbr = wantTexture && pbr !== false;   // PBR maps only when texturing
-      const aiModel = hd ? 'meshy-5' : undefined;         // HD texture → latest, higher-fidelity model
-      let base, task, st;
-      if (image) {
-        base = 'https://api.meshy.ai/openapi/v1/image-to-3d';
-        const body = { image_url: image, should_texture: wantTexture, enable_pbr: enablePbr, should_remesh: true };
-        if (aiModel) body.ai_model = aiModel;
-        if (texturePrompt) body.texture_prompt = texturePrompt;
-        task = await jsonFetch(base, { method: 'POST', headers: this.headers(), body: JSON.stringify(body) });
-        st = await this.poll(base, task.result);
-      } else {
-        if (!prompt) throw apiError('Connect a prompt or an image to the 3D node', 400);
-        base = 'https://api.meshy.ai/openapi/v2/text-to-3d';
-        const pbody = { mode: 'preview', prompt, art_style: artStyle || 'realistic', should_remesh: true };
-        if (aiModel) pbody.ai_model = aiModel;
-        task = await jsonFetch(base, { method: 'POST', headers: this.headers(), body: JSON.stringify(pbody) });
-        st = await this.poll(base, task.result);
-        // text-to-3D previews are untextured — run the refine pass to texture (+PBR) when asked
-        if (wantTexture) {
-          const rbody = { mode: 'refine', preview_task_id: task.result, enable_pbr: enablePbr };
-          if (aiModel) rbody.ai_model = aiModel;
-          if (texturePrompt) rbody.texture_prompt = texturePrompt;
-          const refine = await jsonFetch(base, { method: 'POST', headers: this.headers(), body: JSON.stringify(rbody) });
-          st = await this.poll(base, refine.result);
-        }
-      }
-      const urls = st.model_urls || {};
-      if (!urls.glb && !urls.obj && !urls.fbx) throw apiError('Meshy returned no model');
-      const want = String(format || 'glb').toLowerCase();
-      const models = { glb: urls.glb || null, obj: urls.obj || null, fbx: urls.fbx || null, usdz: urls.usdz || null, mtl: urls.mtl || null };
-      // PBR texture maps (Meshy returns an array — one entry per material; take the first)
-      const t = Array.isArray(st.texture_urls) ? (st.texture_urls[0] || {}) : (st.texture_urls || {});
-      const textures = {
-        base_color: t.base_color || null,
-        metallic: t.metallic || null,
-        roughness: t.roughness || null,
-        normal: t.normal || null,
-      };
-      return {
-        model: models[want] || models.glb || models.obj || models.fbx,  // chosen download format
-        glb: models.glb,                                                 // always for in-app preview
-        format: models[want] ? want : (models.glb ? 'glb' : want),
-        models,
-        textures,
-        pbr: enablePbr,
-        thumbnail: st.thumbnail_url || null,
-      };
-    },
-  },
 };
 
 // =====================================================================

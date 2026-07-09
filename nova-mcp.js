@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /*
  * Nova MCP server — exposes Nova's asset generation to Claude Code (and other
- * MCP clients) over stdio. Reads keys from Nova's .env; generates 2D via Gemini
- * (Nano Banana) and 3D via Meshy; files assets into a game project by engine.
+ * MCP clients) over stdio. Reads keys from Nova's .env; generates 2D art via
+ * Gemini (Nano Banana); files assets into a game project by engine.
  *
  * Run as MCP:   node nova-mcp.js
  * Self-test:    node nova-mcp.js selftest <projectDir> [category]
@@ -19,7 +19,7 @@ const path = require('path');
     if (m && !line.trim().startsWith('#')) process.env[m[1]] = m[2];
   }
 })();
-const KEYS = { gemini: process.env.GEMINI_API_KEY || '', meshy: process.env.MESHY_API_KEY || '' };
+const KEYS = { gemini: process.env.GEMINI_API_KEY || '' };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const log = (...a) => process.stderr.write('[nova-mcp] ' + a.join(' ') + '\n'); // never stdout (reserved for JSON-RPC)
 
@@ -43,21 +43,6 @@ async function genImagePNG(prompt, aspect, refPngs) {
   const inline = part && (part.inlineData || part.inline_data);
   if (!inline) throw new Error('Gemini returned no image: ' + JSON.stringify(data).slice(0, 240));
   return Buffer.from(inline.data, 'base64');
-}
-async function gen3dGLB(prompt) {
-  if (!KEYS.meshy) throw new Error('MESHY_API_KEY not set in Nova .env');
-  const h = { Authorization: `Bearer ${KEYS.meshy}`, 'Content-Type': 'application/json' };
-  const base = 'https://api.meshy.ai/openapi/v2/text-to-3d';
-  const task = await (await fetch(base, { method: 'POST', headers: h, body: JSON.stringify({ mode: 'preview', prompt, art_style: 'realistic', should_remesh: true }) })).json();
-  const id = task.result;
-  if (!id) throw new Error('Meshy did not accept the task');
-  for (let i = 0; i < 240; i++) {
-    await sleep(5000);
-    const st = await (await fetch(`${base}/${id}`, { headers: h })).json();
-    if (st.status === 'SUCCEEDED') { const url = st.model_urls && st.model_urls.glb; if (!url) throw new Error('Meshy: no GLB'); return Buffer.from(await (await fetch(url)).arrayBuffer()); }
-    if (st.status === 'FAILED' || st.status === 'CANCELED') throw new Error('Meshy task ' + st.status.toLowerCase());
-  }
-  throw new Error('Meshy generation timed out');
 }
 
 // ---- engine detection + asset routing ----
@@ -101,16 +86,10 @@ function styled(prompt) {
 async function generateAsset(spec) {
   if (!project.dir) throw new Error('No project set. Call set_project first.');
   const id = spec.id || (spec.prompt || 'asset').toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 40);
-  const type = spec.type === '3d' ? '3d' : 'image';
-  const category = spec.category || (type === '3d' ? 'models' : 'images');
-  if (type === '3d') {
-    const glb = await gen3dGLB(styled(spec.prompt));
-    const f = assetFile(category, id, 'glb'); fs.writeFileSync(f, glb);
-    return { id, type, path: f };
-  }
+  const category = spec.category || 'images';
   const png = await genImagePNG(styled(spec.prompt), spec.aspect || '1:1');
   const f = assetFile(category, id, 'png'); fs.writeFileSync(f, png);
-  return { id, type, path: f, bytes: png.length };
+  return { id, type: 'image', path: f, bytes: png.length };
 }
 async function generateFromManifest(filter) {
   if (!project.manifest) throw new Error('No nova.assets.json manifest in ' + project.dir);
@@ -143,8 +122,8 @@ const TOOLS = [
   { name: 'set_project', description: 'Point Nova at a game project folder. Auto-detects the engine (Godot/Unreal/Unity) and asset root, and loads its nova.assets.json manifest if present.',
     inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'Absolute path to the game project root' }, engine: { type: 'string', enum: ['godot', 'unreal', 'unity', 'generic'], description: 'Optional override' } }, required: ['path'] } },
   { name: 'list_assets', description: 'List the planned assets (from nova.assets.json) and the asset files already generated on disk.', inputSchema: { type: 'object', properties: {} } },
-  { name: 'generate_asset', description: 'Generate one art asset and file it into the project. type "image" (Nano Banana) or "3d" (Meshy, GLB).',
-    inputSchema: { type: 'object', properties: { id: { type: 'string' }, prompt: { type: 'string' }, type: { type: 'string', enum: ['image', '3d'] }, category: { type: 'string', description: 'e.g. towers, enemies, ui, tiles' }, aspect: { type: 'string', description: 'e.g. 1:1, 16:9' } }, required: ['prompt'] } },
+  { name: 'generate_asset', description: 'Generate one 2D art asset (Nano Banana) and file it into the project.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, prompt: { type: 'string' }, category: { type: 'string', description: 'e.g. towers, enemies, ui, tiles' }, aspect: { type: 'string', description: 'e.g. 1:1, 16:9' } }, required: ['prompt'] } },
   { name: 'generate_assets', description: 'Batch-generate assets from the project manifest (nova.assets.json). Optionally filter by category or ids; otherwise generates all.',
     inputSchema: { type: 'object', properties: { category: { type: 'string' }, ids: { type: 'array', items: { type: 'string' } } } } },
   { name: 'add_asset', description: 'Append an asset spec to the project manifest (does not generate it).',

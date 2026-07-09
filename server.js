@@ -764,6 +764,44 @@ const server = http.createServer(async (req, res) => {
       return json(res, 404, { error: 'unknown admin route' });
     }
 
+    // ---- templates: everyone reads the ones visible to them; enterprise admin authors ----
+    if (urlPath === '/api/templates') {
+      const me = await getUser(uid);
+      if (!me) return json(res, 401, { error: 'Not signed in' });
+      const doc = (await store.get('templates')) || { list: [] };
+      if (req.method === 'GET') {
+        const visible = doc.list.filter(t => t.scope === 'universal' || isEnt(me) || (t.scope === 'team' && t.teamId && t.teamId === me.teamId));
+        const a = await getAccounts();
+        return json(res, 200, {
+          templates: visible.map(t => ({ id: t.id, name: t.name, scope: t.scope, teamId: t.teamId || null, team: (a.teams[t.teamId] && a.teams[t.teamId].name) || null })),
+          canAuthor: isEnt(me), teams: isEnt(me) ? Object.values(a.teams) : [],
+        });
+      }
+      if (req.method === 'POST') {
+        if (!isEnt(me)) return json(res, 403, { error: 'Only an enterprise admin can save templates' });
+        const b = await readBody(req);
+        if (!b.name || !b.graph) return json(res, 400, { error: 'name and graph required' });
+        const t = { id: 'tpl' + crypto.randomBytes(4).toString('hex'), name: String(b.name).slice(0, 60), scope: b.scope === 'team' ? 'team' : 'universal', teamId: b.scope === 'team' ? (b.teamId || null) : null, graph: b.graph, createdBy: me.id, createdAt: Date.now() };
+        doc.list.push(t); await store.put('templates', doc);
+        return json(res, 200, { ok: true, id: t.id });
+      }
+    }
+    const tm = /^\/api\/templates\/([\w-]+)$/.exec(urlPath);
+    if (tm) {
+      const me = await getUser(uid);
+      if (!me) return json(res, 401, { error: 'Not signed in' });
+      const doc = (await store.get('templates')) || { list: [] };
+      if (req.method === 'GET') {
+        const t = doc.list.find(x => x.id === tm[1]);
+        return t ? json(res, 200, { template: { id: t.id, name: t.name, graph: t.graph } }) : json(res, 404, { error: 'not found' });
+      }
+      if (req.method === 'DELETE') {
+        if (!isEnt(me)) return json(res, 403, { error: 'Enterprise admin only' });
+        doc.list = doc.list.filter(x => x.id !== tm[1]); await store.put('templates', doc);
+        return json(res, 200, { ok: true });
+      }
+    }
+
     // ---- gate everything else behind a session ----
     const publicStatic = urlPath === '/login.html' || urlPath.startsWith('/director') ||
       /\.(css|js|mjs|svg|png|jpe?g|webp|gif|ico|glb|gltf|bin|wasm|woff2?|ttf|map)$/i.test(urlPath);

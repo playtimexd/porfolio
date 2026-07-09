@@ -1992,19 +1992,68 @@ const TEMPLATES = [
   },
 ];
 
-document.getElementById('btn-templates').addEventListener('click', () => {
+document.getElementById('btn-templates').addEventListener('click', () => openTemplatesModal());
+async function openTemplatesModal() {
   const body = openModal('Templates — start a new project from a pipeline');
-  for (const t of TEMPLATES) {
-    const card = el('div', { class: 'tpl-card' });
-    card.appendChild(el('b', {}, t.name));
-    card.appendChild(el('span', {}, t.desc));
-    card.addEventListener('click', () => {
-      closeModal();
-      createProject(t.name, () => t.build());
-    });
-    body.appendChild(card);
-  }
-});
+  const render = async () => {
+    body.innerHTML = '';
+    body.appendChild(el('div', { class: 'modal-hint' }, 'Built-in starters'));
+    const grid = el('div', { class: 'tpl-grid' });
+    for (const t of TEMPLATES) {
+      const card = el('div', { class: 'tpl-card' });
+      card.appendChild(el('b', {}, t.name));
+      card.appendChild(el('span', {}, t.desc));
+      card.addEventListener('click', () => { closeModal(); createProject(t.name, () => t.build()); });
+      grid.appendChild(card);
+    }
+    body.appendChild(grid);
+
+    let data = { templates: [], canAuthor: false, teams: [] };
+    try { data = await (await fetch('/api/templates')).json(); } catch { /* none */ }
+    if (data.templates.length) {
+      body.appendChild(el('div', { class: 'modal-hint' }, 'Saved templates'));
+      const g2 = el('div', { class: 'tpl-grid' });
+      for (const t of data.templates) {
+        const card = el('div', { class: 'tpl-card' });
+        card.appendChild(el('b', {}, t.name));
+        card.appendChild(el('span', {}, t.scope === 'team' ? ('Team' + (t.team ? ' · ' + t.team : '')) : 'Universal'));
+        card.addEventListener('click', async () => {
+          const r = await fetch('/api/templates/' + t.id); const d = await r.json();
+          if (r.ok) { closeModal(); createProject(t.name, () => loadGraph(d.template.graph)); }
+        });
+        if (data.canAuthor) {
+          const del = el('button', { class: 'tpl-del danger', title: 'Delete template' }, '✕');
+          del.addEventListener('click', async (e) => { e.stopPropagation(); await fetch('/api/templates/' + t.id, { method: 'DELETE' }); render(); });
+          card.appendChild(del);
+        }
+        g2.appendChild(card);
+      }
+      body.appendChild(g2);
+    }
+
+    if (data.canAuthor) {
+      body.appendChild(el('div', { class: 'modal-hint' }, 'Save the current canvas as a reusable template (enterprise admin):'));
+      const row = el('div', { class: 'admin-invite' });
+      const name = el('input', { type: 'text', placeholder: 'template name…' });
+      const scope = el('select', {});
+      scope.appendChild(el('option', { value: 'universal' }, 'Universal — everyone'));
+      for (const tm of data.teams) scope.appendChild(el('option', { value: 'team:' + tm.id }, 'Team · ' + tm.name));
+      const save = el('button', { class: 'primary' }, 'Save template');
+      save.addEventListener('click', async () => {
+        if (!name.value.trim()) { toast('Name the template first'); return; }
+        if (!nodes.size) { toast('Canvas is empty — build a workflow first'); return; }
+        const sv = scope.value, scopeVal = sv.startsWith('team:') ? 'team' : 'universal', teamId = sv.startsWith('team:') ? sv.slice(5) : null;
+        const r = await fetch('/api/templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.value.trim(), scope: scopeVal, teamId, graph: serializeGraph() }) });
+        const d = await r.json();
+        if (!r.ok) { toast(d.error || 'failed', 'error'); return; }
+        toast('Template saved'); render();
+      });
+      row.append(name, scope, save);
+      body.appendChild(row);
+    }
+  };
+  render();
+}
 
 // Assets library (session) -----------------------------------------------
 const assets = [];

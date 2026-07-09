@@ -865,7 +865,9 @@ button.danger { color: #ff9aa8; }
 button.danger:hover { background: rgba(229,72,77,.15); }
 
 /* template cards */
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 8px 0 6px; }
 .tpl-card {
+  position: relative;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -876,6 +878,8 @@ button.danger:hover { background: rgba(229,72,77,.15); }
 .tpl-card:hover { border-color: var(--accent); }
 .tpl-card b { display: block; font-size: 13px; margin-bottom: 4px; }
 .tpl-card span { font-size: 11.5px; color: var(--text-dim); }
+.tpl-del { position: absolute; top: 5px; right: 6px; border: none; background: none; color: #ff9aa8; cursor: pointer; font-size: 12px; padding: 2px 5px; }
+.tpl-del:hover { background: rgba(229,72,77,.15); border-radius: 5px; }
 
 /* skill checkboxes in props */
 .chk {

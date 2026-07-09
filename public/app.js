@@ -1,4 +1,20 @@
-// ArtCanvas Studio — Weavy-style node editor
+// Nova — Weavy-style node editor
+// If a session expires mid-use, any API call returns 401 → send to login
+// instead of failing silently.
+(function () {
+  const orig = window.fetch;
+  window.fetch = async (...args) => {
+    const res = await orig(...args);
+    try {
+      const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+      if (res.status === 401 && url.includes('/api/') && !url.includes('/api/auth/me')) {
+        location.href = '/login.html';
+      }
+    } catch { /* ignore */ }
+    return res;
+  };
+})();
+
 // Graph state ---------------------------------------------------------
 const nodes = new Map();   // id -> {id, type, x, y, data, out, el}
 let edges = [];            // {id, from:{node,port}, to:{node,port}, type}
@@ -712,9 +728,13 @@ async function api(model, inputs) {
     const jr = await fetch('/api/jobs/' + data.jobId);
     const j = await jr.json();
     if (!jr.ok) throw new Error(j.error || 'Job lost');
-    if (j.status === 'done') return j.result;
+    if (j.status === 'done') { refreshCredits(); return j.result; }
     if (j.status === 'error') throw new Error(j.error);
   }
+}
+// keep the account chip's credit balance in sync after generations
+async function refreshCredits() {
+  try { const u = (await (await fetch('/api/auth/me')).json()).user; if (u) { currentAccount = u; renderAccountChip(); } } catch { /* ignore */ }
 }
 
 // Node creation --------------------------------------------------------
@@ -2567,7 +2587,13 @@ function renderPresence() {
   let p = document.getElementById('presence');
   if (!p) { p = el('div', { id: 'presence' }); document.body.appendChild(p); }
   p.innerHTML = '';
-  if (!collabActive()) { p.hidden = true; return; }
+  const shareBtn = document.getElementById('btn-share');
+  if (!collabActive()) {
+    p.hidden = true;
+    if (shareBtn) { shareBtn.textContent = '🔗 Share'; shareBtn.classList.remove('live'); }
+    return;
+  }
+  if (shareBtn) { shareBtn.textContent = `🔗 Shared · ${collab.roster.length}`; shareBtn.classList.add('live'); }
   p.hidden = false;
   p.appendChild(el('span', { class: 'pres-tag' }, '● live'));
   for (const u of collab.roster) {

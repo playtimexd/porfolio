@@ -149,7 +149,7 @@ const NODE_TYPES = {
       box.appendChild(el('label', {}, 'Model'));
       box.appendChild(modelSelect(node, 'video'));
       const row = el('div', { class: 'row' });
-      const c1 = el('div'); c1.appendChild(el('label', {}, 'Duration')); const dsel = selectCtl(node, 'duration', [['4', '4s'], ['5', '5s'], ['6', '6s'], ['8', '8s'], ['10', '10s'], ['12', '12s'], ['15', '15s']]); c1.appendChild(dsel);
+      const c1 = el('div'); c1.appendChild(el('label', {}, 'Duration')); const dsel = selectCtl(node, 'duration', Array.from({ length: 12 }, (_, i) => [String(i + 4), (i + 4) + 's'])); c1.appendChild(dsel);
       const c2 = el('div'); c2.appendChild(el('label', {}, 'Ratio')); c2.appendChild(selectCtl(node, 'ratio', VIDEO_RATIO_OPTS));
       const c3 = el('div'); c3.appendChild(el('label', {}, 'Quality')); const qsel = selectCtl(node, 'quality', VIDEO_QUALITY_OPTS); c3.appendChild(qsel);
       row.appendChild(c1); row.appendChild(c2); row.appendChild(c3);

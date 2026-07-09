@@ -102,7 +102,7 @@ input:focus { outline: none; border-color: var(--accent); }
       const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, name }) });
       const d = await r.json();
       if (!r.ok) { err.textContent = d.error || 'Sign-in failed'; return; }
-      location.href = '/';
+      location.href = '/canvas.html';
     } catch (e2) { err.textContent = 'Sign-in failed'; }
   });
 })();

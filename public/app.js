@@ -1934,13 +1934,43 @@ function createProject(name, build, opts = {}) {
 }
 
 function updateProjectUI() {
-  const sel = document.getElementById('project-select');
-  sel.innerHTML = '';
-  for (const p of projects.list) sel.appendChild(el('option', { value: p.id }, p.name));
-  sel.value = projects.current;
+  const cur = projects.list.find(p => p.id === projects.current);
+  const lbl = document.getElementById('proj-current');
+  if (lbl) lbl.textContent = cur ? cur.name : 'Project';
 }
 
-document.getElementById('project-select').addEventListener('change', (e) => openProject(e.target.value));
+function openProjectsMenu() {
+  const existing = document.getElementById('projects-menu');
+  if (existing) { existing.remove(); return; }
+  const m = el('div', { id: 'projects-menu' });
+  m.appendChild(el('div', { class: 'pm-head' }, 'Recent projects'));
+  const list = projects.list.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 12);
+  const fmt = (t) => t ? new Date(t).toLocaleString() : '';
+  if (!list.length) m.appendChild(el('div', { class: 'pm-empty' }, 'No projects yet.'));
+  for (const p of list) {
+    const it = el('button', { class: 'pm-item' + (p.id === projects.current ? ' on' : '') });
+    it.appendChild(el('b', {}, p.name));
+    it.appendChild(el('span', {}, fmt(p.updatedAt)));
+    it.addEventListener('click', () => { m.remove(); if (p.id !== projects.current) openProject(p.id); });
+    m.appendChild(it);
+  }
+  const foot = el('div', { class: 'pm-foot' });
+  const nw = el('button', {}, '＋ New');
+  nw.addEventListener('click', () => { m.remove(); document.getElementById('btn-new-project').click(); });
+  const tp = el('button', {}, '✨ Templates');
+  tp.addEventListener('click', () => { m.remove(); document.getElementById('btn-templates').click(); });
+  foot.append(nw, tp);
+  m.appendChild(foot);
+  document.body.appendChild(m);
+  const r = document.getElementById('btn-projects').getBoundingClientRect();
+  m.style.left = r.left + 'px';
+  m.style.top = (r.bottom + 6) + 'px';
+}
+document.getElementById('btn-projects').addEventListener('click', (e) => { e.stopPropagation(); openProjectsMenu(); });
+document.addEventListener('pointerdown', (e) => {
+  const m = document.getElementById('projects-menu');
+  if (m && !e.target.closest('#projects-menu') && !e.target.closest('#btn-projects')) m.remove();
+});
 document.getElementById('btn-new-project').addEventListener('click', () => {
   const name = prompt('Project name:', 'Untitled project');
   if (name !== null) createProject(name.trim() || 'Untitled project');

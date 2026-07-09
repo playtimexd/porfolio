@@ -693,7 +693,7 @@ const server = http.createServer(async (req, res) => {
         const u = await findOrCreateUser(await azureExchange(code));
         setSessionCookie(res, signSession(u.id));
       } catch (e) { console.error('SSO callback failed:', e.message); }
-      res.writeHead(302, { Location: '/' }); return res.end();
+      res.writeHead(302, { Location: '/canvas.html' }); return res.end();
     }
 
     // ---- admin portal API (enterprise + team admins; team admins scoped to their team) ----
@@ -809,8 +809,16 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // ---- entry: the marketing landing is for logged-out first-timers;
+    //      signed-in users go straight to the canvas ----
+    if (urlPath === '/' || urlPath === '/index.html') {
+      if (uid) { res.writeHead(302, { Location: '/canvas.html' }); return res.end(); }
+      // logged-out: serve the public landing (falls through to static)
+    }
+
     // ---- gate everything else behind a session ----
-    const publicStatic = urlPath === '/login.html' || urlPath.startsWith('/director') ||
+    const publicStatic = urlPath === '/' || urlPath === '/index.html' || urlPath === '/login.html' ||
+      urlPath.startsWith('/director') ||
       /\.(css|js|mjs|svg|png|jpe?g|webp|gif|ico|glb|gltf|bin|wasm|woff2?|ttf|map)$/i.test(urlPath);
     if (!uid && !publicStatic) {
       if (urlPath.startsWith('/api/')) return json(res, 401, { error: 'Not signed in' });

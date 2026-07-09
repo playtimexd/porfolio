@@ -952,6 +952,26 @@ button.danger:hover { background: rgba(229,72,77,.15); }
 #account-menu button:hover { background: var(--panel-2); }
 #account-menu button.danger { color: #ff9aa8; }
 
+/* projects launcher */
+#btn-projects { display: flex; align-items: center; gap: 6px; max-width: 210px; }
+#proj-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+#btn-projects .caret { color: var(--text-dim); font-size: 10px; }
+#projects-menu {
+  position: fixed; z-index: 120; width: 268px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 11px;
+  padding: 8px; box-shadow: 0 14px 44px rgba(0,0,0,.55); display: flex; flex-direction: column; gap: 2px;
+}
+.pm-head { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-dim); padding: 4px 8px 6px; }
+.pm-empty { font-size: 12px; color: var(--text-dim); padding: 6px 8px; }
+.pm-item { text-align: left; background: none; border: none; color: var(--text); padding: 7px 8px; border-radius: 7px; cursor: pointer; display: flex; flex-direction: column; gap: 1px; }
+.pm-item:hover { background: var(--panel-2); }
+.pm-item.on { background: rgba(25,198,214,.14); }
+.pm-item b { font-size: 12.5px; font-weight: 600; }
+.pm-item span { font-size: 10.5px; color: var(--text-dim); }
+.pm-foot { display: flex; gap: 6px; border-top: 1px solid var(--border); margin-top: 5px; padding-top: 7px; }
+.pm-foot button { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 7px; cursor: pointer; font-size: 12px; }
+.pm-foot button:hover { border-color: var(--accent); }
+
 /* admin portal */
 .admin-invite { display: flex; gap: 6px; margin: 10px 0 14px; }
 .admin-invite input { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; }

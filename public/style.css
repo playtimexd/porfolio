@@ -524,13 +524,13 @@ video.lb-media { cursor: default; }
 }
 #dock button:hover { background: var(--panel-2); color: var(--text); }
 .dock-ic {
-  width: 26px; height: 26px;
+  width: 39px; height: 39px;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 7px;
+  border-radius: 9px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--c);
-  font-size: 13px;
+  font-size: 20px;
 }
 #dock button:hover .dock-ic { border-color: var(--c); box-shadow: 0 0 8px color-mix(in srgb, var(--c) 40%, transparent); }
 .dock-hint { font-size: 10px; color: var(--text-dim); padding: 0 10px 0 6px; opacity: .7; }

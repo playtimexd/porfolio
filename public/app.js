@@ -184,7 +184,7 @@ const NODE_TYPES = {
     title: '3D Model', color: '#6ef0d2', desc: 'prompt/image → 3D',
     inputs: [{ name: 'prompt', type: 'text', optional: true }, { name: 'image', type: 'image', optional: true }],
     outputs: [{ name: 'model', type: 'model' }],
-    defaults: () => ({ model: '', artStyle: 'realistic', quality: 'preview' }),
+    defaults: () => ({ model: '', artStyle: 'realistic', quality: 'preview', format: 'glb', pbr: true, hd: false }),
     sub: (n) => modelLabel(n.data.model),
     media(node) {
       if (node.out.media) return mediaEl(node.out.media);
@@ -202,7 +202,20 @@ const NODE_TYPES = {
       c2.appendChild(selectCtl(node, 'quality', [['preview', 'Preview (fast)'], ['textured', 'Textured (slower)']]));
       row.appendChild(c1); row.appendChild(c2);
       box.appendChild(row);
-      box.appendChild(el('div', { class: 'mini-hint' }, 'Textured runs Meshy’s refine pass — better result, more credits. Drag the preview to rotate it.'));
+
+      // Texturing options (only meaningful once the mesh is textured)
+      const trow = el('div', { class: 'row' });
+      const t1 = el('div');
+      t1.appendChild(el('label', {}, 'Download format'));
+      t1.appendChild(selectCtl(node, 'format', [['glb', 'GLB (.glb)'], ['obj', 'OBJ (.obj)'], ['fbx', 'FBX (.fbx)'], ['usdz', 'USDZ (.usdz)']]));
+      const t2 = el('div', { class: 'threed-toggles' });
+      t2.appendChild(checkCtl(node, 'pbr', 'PBR maps'));
+      t2.appendChild(checkCtl(node, 'hd', 'HD texture'));
+      trow.appendChild(t1); trow.appendChild(t2);
+      box.appendChild(trow);
+
+      box.appendChild(el('div', { class: 'mini-hint' }, 'Textured runs Meshy’s refine pass (more credits). PBR maps export base-color, metallic, roughness & normal. HD texture uses Meshy-5 for higher-fidelity materials. Drag the preview to rotate it.'));
+      threedDownloads(node, box);
       actionRow(node, box);
     },
     async exec(node, inputs) {
@@ -210,11 +223,18 @@ const NODE_TYPES = {
       const image = v(inputs.image);
       if (!prompt && !image) throw new Error('Connect a prompt or an image');
       setState(node, 'running', 'Sculpting… this takes a few minutes');
-      const r = await api(node.data.model, { prompt, image, artStyle: node.data.artStyle, quality: node.data.quality });
-      node.out.media = { kind: 'model', src: r.model, poster: r.thumbnail };
-      addAsset('model', r.model, prompt || '3D from image', r.thumbnail);
+      const r = await api(node.data.model, {
+        prompt, image, artStyle: node.data.artStyle, quality: node.data.quality,
+        format: node.data.format, pbr: node.data.pbr, hd: node.data.hd,
+      });
+      // preview needs GLB; the chosen format drives downloads
+      node.out.media = {
+        kind: 'model', src: r.glb || r.model, poster: r.thumbnail,
+        models: r.models || {}, textures: r.textures || {}, format: r.format || node.data.format || 'glb',
+      };
+      addAsset('model', r.model || r.glb, prompt || '3D from image', r.thumbnail);
       refreshMedia(node);
-      return { model: { type: 'model', value: r.model } };
+      return { model: { type: 'model', value: r.glb || r.model } };
     },
   },
 
@@ -661,6 +681,47 @@ function selectCtl(node, key, options) {
   return sel;
 }
 
+// A labelled checkbox bound to node.data[key].
+function checkCtl(node, key, label) {
+  const wrap = el('label', { class: 'check' });
+  const cb = el('input', { type: 'checkbox' });
+  cb.checked = !!node.data[key];
+  cb.addEventListener('change', () => { node.data[key] = cb.checked; save(); });
+  wrap.appendChild(cb);
+  wrap.appendChild(document.createTextNode(' ' + label));
+  return wrap;
+}
+
+// Download links for a finished 3D result — every mesh format Meshy returned,
+// plus the individual PBR texture maps when present.
+function threedDownloads(node, box) {
+  const media = node.out.media;
+  if (!media || media.kind !== 'model') return;
+  const models = media.models || {};
+  const textures = media.textures || {};
+  const dl = (url, name) => {
+    const a = el('a', { class: 'dl-chip', href: url, download: name, title: 'Download ' + name });
+    if (!url.startsWith('data:')) a.target = '_blank';
+    a.textContent = name;
+    return a;
+  };
+  const fmts = ['glb', 'obj', 'fbx', 'usdz'].filter(f => models[f]);
+  if (fmts.length) {
+    box.appendChild(el('label', {}, 'Mesh files'));
+    const g = el('div', { class: 'dl-row' });
+    for (const f of fmts) g.appendChild(dl(models[f], `${node.id}.${f}`));
+    if (models.mtl) g.appendChild(dl(models.mtl, `${node.id}.mtl`));
+    box.appendChild(g);
+  }
+  const maps = [['base_color', 'base color'], ['metallic', 'metallic'], ['roughness', 'roughness'], ['normal', 'normal']].filter(([k]) => textures[k]);
+  if (maps.length) {
+    box.appendChild(el('label', {}, 'PBR texture maps'));
+    const g = el('div', { class: 'dl-row' });
+    for (const [k, lbl] of maps) g.appendChild(dl(textures[k], `${node.id}-${k}.png`));
+    box.appendChild(g);
+  }
+}
+
 function actionRow(node, box) {
   const row = el('div', { class: 'btn-row' });
   const run = el('button', { class: 'primary' }, '▶ Run');
@@ -699,9 +760,14 @@ function refButton(node) {
 function downloadNode(node) {
   const media = node.out.media;
   if (!media) return;
-  const ext = media.kind === 'video' ? 'mp4' : media.kind === 'model' ? 'glb' : 'png';
-  const a = el('a', { href: media.src, download: `artcanvas-${node.id}.${ext}` });
-  if (!media.src.startsWith('data:')) a.target = '_blank';
+  let href = media.src, ext = media.kind === 'video' ? 'mp4' : media.kind === 'model' ? 'glb' : 'png';
+  if (media.kind === 'model') {
+    const fmt = media.format || 'glb';
+    href = (media.models && media.models[fmt]) || media.src;
+    ext = (media.models && media.models[fmt]) ? fmt : 'glb';
+  }
+  const a = el('a', { href, download: `nova-${node.id}.${ext}` });
+  if (!href.startsWith('data:')) a.target = '_blank';
   a.click();
 }
 
@@ -709,6 +775,8 @@ function refreshMedia(node) {
   const box = node.el.querySelector('.node-media');
   box.innerHTML = '';
   box.appendChild(NODE_TYPES[node.type].media(node));
+  // if this node's panel is open, re-render it so new download options (formats/PBR maps) show
+  if (selected?.kind === 'node' && selected.id === node.id) renderProps(node);
   redrawEdges();
   drawMinimap();
   if (selected?.kind === 'node' && selected.id === node.id) {
@@ -2142,7 +2210,7 @@ document.getElementById('assets-close').addEventListener('click', () => { assets
 // Agent chat --------------------------------------------------------------
 let chatHistory = [];
 let chatBusy = false;
-const chatCfg = { model: '', imageModel: '', videoModel: '', aspect: '', skills: [] };
+const chatCfg = { model: '', imageModel: '', videoModel: '', threeD: '', threeDQuality: 'preview', threeDFormat: 'glb', aspect: '', skills: [] };
 try { chatCfg.skills = JSON.parse(PREFS['chat:skills'] || '[]'); } catch { chatCfg.skills = []; }
 const chatPanel = document.getElementById('chat');
 const chatMsgs = document.getElementById('chat-msgs');
@@ -2177,13 +2245,28 @@ function addChatAttachments(files) {
 }
 // place chat-generated media straight onto the canvas (no manual node building)
 let chatDropOffset = 0;
-function dropChatMediaOnCanvas(kind, src) {
+function dropChatMediaOnCanvas(kind, src, poster, item) {
   const rect = viewport.getBoundingClientRect();
   const cx = (rect.width / 2 - panX) / zoom - 130 + chatDropOffset;
   const cy = (rect.height / 2 - panY) / zoom - 90 + chatDropOffset;
   chatDropOffset = (chatDropOffset + 46) % 230;
-  // Only images become canvas nodes; video stays in the chat + Assets.
+  // Images and 3D models become canvas nodes; video stays in the chat + Assets.
   if (kind === 'image') addNode('upload', cx, cy, { image: src, title: 'Image' });
+  else if (kind === 'model') {
+    const q = chatCfg.threeDQuality || 'preview';
+    const n = addNode('threeD', cx, cy, {
+      model: chatCfg.threeD || 'meshy-3d', title: '3D Model',
+      quality: q === 'preview' ? 'preview' : 'textured', hd: q === 'hd', pbr: q !== 'preview',
+      format: (item && item.format) || chatCfg.threeDFormat || 'glb',
+    });
+    n.out.media = {
+      kind: 'model', src: (item && item.glb) || src, poster,
+      models: (item && item.models) || {}, textures: (item && item.textures) || {},
+      format: (item && item.format) || chatCfg.threeDFormat || 'glb',
+    };
+    refreshMedia(n);
+    save();
+  }
 }
 
 const CHAT_SYSTEM =
@@ -2193,10 +2276,11 @@ const CHAT_SYSTEM =
   `- The user may attach reference images. When present, describe/honour them: match the subject, style, palette or composition, and weave that into the generation prompts.\n` +
   `- Text deliverables: set deliverable.kind to "prompts", "script" or "storyboard", give it a title, and put each item/scene/shot in shots — prompt is the full text of that item, caption a short label (e.g. "Scene 1 — INT. LIGHTHOUSE, NIGHT").\n` +
   `- When the user asks to generate, create, make, render or "put on the canvas" images (or a video), set kind to "images" (or "video") and put final, detailed generation prompts in shots (max 9) with consistent characters, style and lighting. PREFER generating over merely returning prompts — the app renders them straight onto the canvas. Do NOT ask to confirm unless the request is genuinely ambiguous.\n` +
+  `- When the user asks to generate/create/make a 3D model, mesh, sculpture, prop, character or game asset (or says "in 3D"/"as a model"), set kind to "model". Put ONE object per shot (max 4) — each shot.prompt is a detailed text-to-3D description of a single isolated object: its form, silhouette, materials and surface. Do NOT describe scenes, backgrounds or multiple objects in one shot. 3D generation takes a few minutes per model. If the user attached a reference image, it will drive image-to-3D from that picture.\n` +
   `- Use kind "prompts"/"script"/"storyboard" only when the user explicitly wants text to review rather than finished images.\n` +
   `- Otherwise set kind "none" with an empty shots array.\n` +
   `- ASPECT RATIO: include an "aspect" field on each shot ONLY when the request implies a shape — 9:16 for phone/story/reel/portrait, 16:9 or 21:9 for cinematic/banner/wallpaper/landscape, 4:3 or 3:4 for standard photo, 1:1 for square posts/avatars/icons (supported: 21:9, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3, 9:16). If no particular shape is implied, set "aspect" to "auto" and let the model frame it naturally — do NOT impose a fixed default.\n` +
-  `Reply as JSON only: {"reply": "...", "deliverable": {"kind": "...", "title": "...", "shots": [{"prompt": "...", "caption": "...", "aspect": "auto"}]}}. Keep replies concise and warm.`;
+  `Reply as JSON only: {"reply": "...", "deliverable": {"kind": "none|prompts|script|storyboard|images|video|model", "title": "...", "shots": [{"prompt": "...", "caption": "...", "aspect": "auto"}]}}. Keep replies concise and warm.`;
 
 function chatModelSelect(kind, key) {
   const sel = el('select', { title: `${kind} model used by the chat agent` });
@@ -2228,13 +2312,36 @@ function chatAspectSelect() {
   return sel;
 }
 
+function chat3DQualitySelect() {
+  const sel = el('select', { title: '3D quality — Textured/HD run Meshy’s refine pass with PBR maps (more credits)' });
+  sel.appendChild(el('option', { value: 'preview' }, '⬡ 3D: Preview (fast, untextured)'));
+  sel.appendChild(el('option', { value: 'textured' }, '⬢ 3D: Textured + PBR'));
+  sel.appendChild(el('option', { value: 'hd' }, '✦ 3D: HD texture + PBR (Meshy-5)'));
+  if (!chatCfg.threeDQuality) chatCfg.threeDQuality = PREFS['chat:3dq'] || 'preview';
+  sel.value = chatCfg.threeDQuality;
+  sel.addEventListener('change', () => { chatCfg.threeDQuality = sel.value; setPref('chat:3dq', sel.value); });
+  return sel;
+}
+
+function chat3DFormatSelect() {
+  const sel = el('select', { title: '3D download format' });
+  for (const [v, l] of [['glb', '⬗ GLB'], ['obj', '⬗ OBJ'], ['fbx', '⬗ FBX'], ['usdz', '⬗ USDZ']]) sel.appendChild(el('option', { value: v }, l));
+  if (!chatCfg.threeDFormat) chatCfg.threeDFormat = PREFS['chat:3dfmt'] || 'glb';
+  sel.value = chatCfg.threeDFormat;
+  sel.addEventListener('change', () => { chatCfg.threeDFormat = sel.value; setPref('chat:3dfmt', sel.value); });
+  return sel;
+}
+
 function buildChatCfg() {
   const cfg = document.getElementById('chat-cfg');
   cfg.innerHTML = '';
   cfg.appendChild(chatModelSelect('llm', 'model'));
   cfg.appendChild(chatModelSelect('image', 'imageModel'));
   cfg.appendChild(chatModelSelect('video', 'videoModel'));
+  cfg.appendChild(chatModelSelect('threed', 'threeD'));
   cfg.appendChild(chatAspectSelect());
+  cfg.appendChild(chat3DQualitySelect());
+  cfg.appendChild(chat3DFormatSelect());
   buildChatSkills(cfg);
 }
 
@@ -2275,6 +2382,7 @@ const CHAT_STARTERS = [
   ['📦 Product shots', 'Create 4 professional product photos of … with consistent studio lighting and background'],
   ['🔁 Repurpose an idea', 'Repurpose this idea across platforms: … — write prompt variants for a 1:1 post, a 9:16 story and a 21:9 banner'],
   ['🎞 One-shot video', 'Create one cinematic 5-second video shot of … — write the perfect prompt first, then generate the video'],
+  ['🧊 3D game asset', 'Model a game-ready 3D asset of … — describe the form and materials, then generate it as a 3D model'],
 ];
 
 function renderChat() {
@@ -2283,7 +2391,7 @@ function renderChat() {
   if (!chatHistory.length) {
     const w = el('div', { class: 'cmsg agent' });
     w.appendChild(el('div', { class: 'cbubble' },
-      'Hi! I’m your creative agent. Tell me what you’d like to make — a script, a prompt pack, a storyboard, a cinematic video, an image series — and we’ll shape it together.'));
+      'Hi! I’m your creative agent. Tell me what you’d like to make — a script, a prompt pack, a storyboard, a cinematic video, an image series, or a 3D model — and we’ll shape it together.'));
     chatMsgs.appendChild(w);
     const box = el('div', { class: 'starters' });
     box.appendChild(el('div', { class: 'starters-title' }, 'Try one of these'));
@@ -2324,9 +2432,15 @@ function renderChat() {
       for (const it of m.media) {
         let mm;
         if (it.kind === 'video') { mm = el('video', { src: it.src, controls: '', loop: '', title: it.prompt }); mm.muted = true; }
+        else if (it.kind === 'model') {
+          mm = it.poster
+            ? el('img', { src: it.poster, title: (it.prompt || '3D model') + ' — click to download .glb', class: 'cmodel' })
+            : el('div', { class: 'placeholder cmodel', title: (it.prompt || '3D model') + ' — click to download .glb' }, '🧊');
+        }
         else mm = el('img', { src: it.src, title: it.prompt });
+        const ext = it.kind === 'video' ? 'mp4' : it.kind === 'model' ? (it.format || 'glb') : 'png';
         mm.addEventListener('click', () => {
-          const a = el('a', { href: it.src, download: `artcanvas-chat.${it.kind === 'video' ? 'mp4' : 'png'}` });
+          const a = el('a', { href: it.src, download: `nova-chat.${ext}` });
           if (!it.src.startsWith('data:')) a.target = '_blank';
           a.click();
         });
@@ -2412,6 +2526,8 @@ async function sendChat(text) {
     save();
     if ((d.kind === 'images' || d.kind === 'video') && d.shots?.length) {
       await runChatGeneration(d.kind === 'video' ? 'video' : 'image', d.shots.slice(0, 9), refImgs);
+    } else if (d.kind === 'model' && d.shots?.length) {
+      await runChatGeneration('model', d.shots.slice(0, 4), refImgs);
     }
   } catch (err) {
     pending.pending = false;
@@ -2436,25 +2552,41 @@ async function generateDeliverable(d, btn) {
 }
 
 async function runChatGeneration(kind, shots, refImgs) {
-  const model = kind === 'video' ? chatCfg.videoModel : chatCfg.imageModel;
-  const msg = { role: 'assistant', text: `Generating ${kind} 1/${shots.length}…`, media: [], pending: true };
+  const model = kind === 'video' ? chatCfg.videoModel : kind === 'model' ? chatCfg.threeD : chatCfg.imageModel;
+  if (!model) { chatHistory.push({ role: 'assistant', text: `⚠ No ${kind === 'model' ? '3D' : kind} model available — add its API key in .env.` }); renderChat(); return; }
+  const noun = kind === 'model' ? '3D model' : kind;
+  const slow = kind === 'model' ? ' (a few minutes each)' : '';
+  const msg = { role: 'assistant', text: `Generating ${noun} 1/${shots.length}${slow}…`, media: [], pending: true };
   chatHistory.push(msg);
   renderChat();
   try {
     for (let i = 0; i < shots.length; i++) {
-      msg.text = `Generating ${kind} ${i + 1}/${shots.length}…`;
+      msg.text = `Generating ${noun} ${i + 1}/${shots.length}${slow}…`;
       renderChat();
       const forced = chatCfg.aspect && chatCfg.aspect !== 'auto' ? chatCfg.aspect : null;
-      const g = kind === 'video'
-        ? await api(model, { prompt: shots[i].prompt, duration: shots[i].duration || '5', ratio: forced || shots[i].aspect || shots[i].ratio || 'auto', image: refImgs?.[0] })
-        : await api(model, { prompt: shots[i].prompt, aspect: forced || shots[i].aspect || 'auto', images: refImgs?.length ? refImgs : undefined });
-      const src = kind === 'video' ? g.video : g.image;
-      msg.media.push({ kind, src, prompt: shots[i].prompt });
-      addAsset(kind, src, shots[i].prompt);
-      dropChatMediaOnCanvas(kind, src); // land it on the canvas — no manual nodes needed
+      let src, poster;
+      if (kind === 'model') {
+        const q = chatCfg.threeDQuality || 'preview';
+        const g = await api(model, {
+          prompt: shots[i].prompt, image: refImgs?.[0], artStyle: 'realistic',
+          quality: q === 'preview' ? 'preview' : 'textured',
+          hd: q === 'hd', pbr: q !== 'preview', format: chatCfg.threeDFormat || 'glb',
+        });
+        src = g.model; poster = g.thumbnail;
+        msg.media.push({ kind: 'model', src, poster, prompt: shots[i].prompt, models: g.models, textures: g.textures, glb: g.glb, format: g.format });
+        addAsset('model', g.model || g.glb, shots[i].prompt, poster);
+      } else {
+        const g = kind === 'video'
+          ? await api(model, { prompt: shots[i].prompt, duration: shots[i].duration || '5', ratio: forced || shots[i].aspect || shots[i].ratio || 'auto', image: refImgs?.[0] })
+          : await api(model, { prompt: shots[i].prompt, aspect: forced || shots[i].aspect || 'auto', images: refImgs?.length ? refImgs : undefined });
+        src = kind === 'video' ? g.video : g.image;
+        msg.media.push({ kind, src, prompt: shots[i].prompt });
+        addAsset(kind, src, shots[i].prompt);
+      }
+      dropChatMediaOnCanvas(kind, src, poster, msg.media[msg.media.length - 1]); // land it on the canvas — no manual nodes needed
       renderChat();
     }
-    msg.text = `Done — ${msg.media.length} ${kind}${msg.media.length > 1 ? 's' : ''} generated, added to the canvas and your Assets.`;
+    msg.text = `Done — ${msg.media.length} ${noun}${msg.media.length > 1 ? 's' : ''} generated, added to the canvas and your Assets.`;
   } catch (err) {
     msg.text = `⚠ Generation failed: ${err.message}`;
   }

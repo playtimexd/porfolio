@@ -587,33 +587,55 @@ const providers = {
       }
       throw apiError('Meshy generation timed out');
     },
-    async threed(model, { prompt, image, artStyle, quality }) {
-      let base, task;
+    async threed(model, { prompt, image, artStyle, quality, format, pbr, hd, texturePrompt }) {
+      const wantTexture = quality !== 'preview';
+      const enablePbr = wantTexture && pbr !== false;   // PBR maps only when texturing
+      const aiModel = hd ? 'meshy-5' : undefined;         // HD texture → latest, higher-fidelity model
+      let base, task, st;
       if (image) {
         base = 'https://api.meshy.ai/openapi/v1/image-to-3d';
-        task = await jsonFetch(base, {
-          method: 'POST', headers: this.headers(),
-          body: JSON.stringify({ image_url: image, should_texture: quality !== 'preview', enable_pbr: true }),
-        });
+        const body = { image_url: image, should_texture: wantTexture, enable_pbr: enablePbr, should_remesh: true };
+        if (aiModel) body.ai_model = aiModel;
+        if (texturePrompt) body.texture_prompt = texturePrompt;
+        task = await jsonFetch(base, { method: 'POST', headers: this.headers(), body: JSON.stringify(body) });
+        st = await this.poll(base, task.result);
       } else {
         if (!prompt) throw apiError('Connect a prompt or an image to the 3D node', 400);
         base = 'https://api.meshy.ai/openapi/v2/text-to-3d';
-        task = await jsonFetch(base, {
-          method: 'POST', headers: this.headers(),
-          body: JSON.stringify({ mode: 'preview', prompt, art_style: artStyle || 'realistic', should_remesh: true }),
-        });
+        const pbody = { mode: 'preview', prompt, art_style: artStyle || 'realistic', should_remesh: true };
+        if (aiModel) pbody.ai_model = aiModel;
+        task = await jsonFetch(base, { method: 'POST', headers: this.headers(), body: JSON.stringify(pbody) });
+        st = await this.poll(base, task.result);
+        // text-to-3D previews are untextured — run the refine pass to texture (+PBR) when asked
+        if (wantTexture) {
+          const rbody = { mode: 'refine', preview_task_id: task.result, enable_pbr: enablePbr };
+          if (aiModel) rbody.ai_model = aiModel;
+          if (texturePrompt) rbody.texture_prompt = texturePrompt;
+          const refine = await jsonFetch(base, { method: 'POST', headers: this.headers(), body: JSON.stringify(rbody) });
+          st = await this.poll(base, refine.result);
+        }
       }
-      let st = await this.poll(base, task.result);
-      // text-to-3D previews are untextured — run the refine pass when asked
-      if (!image && quality !== 'preview') {
-        const refine = await jsonFetch(base, {
-          method: 'POST', headers: this.headers(),
-          body: JSON.stringify({ mode: 'refine', preview_task_id: task.result, enable_pbr: true }),
-        });
-        st = await this.poll(base, refine.result);
-      }
-      if (!st.model_urls?.glb) throw apiError('Meshy returned no model');
-      return { model: st.model_urls.glb, thumbnail: st.thumbnail_url || null };
+      const urls = st.model_urls || {};
+      if (!urls.glb && !urls.obj && !urls.fbx) throw apiError('Meshy returned no model');
+      const want = String(format || 'glb').toLowerCase();
+      const models = { glb: urls.glb || null, obj: urls.obj || null, fbx: urls.fbx || null, usdz: urls.usdz || null, mtl: urls.mtl || null };
+      // PBR texture maps (Meshy returns an array — one entry per material; take the first)
+      const t = Array.isArray(st.texture_urls) ? (st.texture_urls[0] || {}) : (st.texture_urls || {});
+      const textures = {
+        base_color: t.base_color || null,
+        metallic: t.metallic || null,
+        roughness: t.roughness || null,
+        normal: t.normal || null,
+      };
+      return {
+        model: models[want] || models.glb || models.obj || models.fbx,  // chosen download format
+        glb: models.glb,                                                 // always for in-app preview
+        format: models[want] ? want : (models.glb ? 'glb' : want),
+        models,
+        textures,
+        pbr: enablePbr,
+        thumbnail: st.thumbnail_url || null,
+      };
     },
   },
 };

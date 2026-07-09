@@ -1124,6 +1124,25 @@ button.danger:hover { background: rgba(229,72,77,.15); }
   margin-top: 8px;
 }
 .cmedia img, .cmedia video { width: 100%; border-radius: 7px; display: block; cursor: pointer; border: 1px solid var(--border); }
+.cmedia .placeholder.cmodel {
+  display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 1 / 1; font-size: 34px; cursor: pointer;
+  border-radius: 7px; border: 1px solid var(--border);
+  background: radial-gradient(circle at 50% 40%, rgba(110,240,210,.14), rgba(18,19,28,.6));
+}
+.cmedia img.cmodel { background: #0e0f18; object-fit: cover; aspect-ratio: 1 / 1; }
+
+/* 3D node — texture toggles + download chips */
+.threed-toggles { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; padding-bottom: 2px; }
+label.check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); text-transform: none; letter-spacing: 0; cursor: pointer; margin: 0; }
+label.check input { width: auto; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.dl-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.dl-chip {
+  font-size: 11px; padding: 4px 9px; border-radius: 999px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--accent-2);
+  text-decoration: none; text-transform: uppercase; letter-spacing: .4px;
+}
+.dl-chip:hover { border-color: var(--accent); color: var(--accent); }
 
 #chat-form {
   display: flex;

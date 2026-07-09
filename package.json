@@ -9,5 +9,10 @@
   "engines": {
     "node": ">=18"
   },
+  "dependencies": {
+    "pg": "^8.13.0"
+  },
+  "optionalDependencies": {},
+  "comments": "pg is only used when DATABASE_URL is set (Behaviour internal Postgres). Dev runs on the local file store with no DB.",
   "license": "MIT"
 }

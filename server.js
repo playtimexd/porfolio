@@ -86,8 +86,33 @@ const SUPA = {
   bucket: process.env.SUPABASE_BUCKET || 'artcanvas',
 };
 const useCloud = !!(SUPA.url && SUPA.key);
+const useDb = !!process.env.DATABASE_URL; // Behaviour internal Postgres
 
-const store = useCloud ? {
+// ---- Postgres key-value adapter (single nova_kv table). `pg` is lazily
+// required so dev runs dependency-free until DATABASE_URL is set. ----
+let _pgPool = null, _pgReady = null;
+function pgPool() {
+  if (!_pgPool) {
+    const { Pool } = require('pg');
+    _pgPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.PGSSL === 'require' ? { rejectUnauthorized: false } : undefined,
+    });
+  }
+  return _pgPool;
+}
+function pgInit() {
+  if (!_pgReady) _pgReady = pgPool().query('CREATE TABLE IF NOT EXISTS nova_kv (k text PRIMARY KEY, v jsonb NOT NULL, updated_at timestamptz DEFAULT now())');
+  return _pgReady;
+}
+const pgStore = {
+  kind: 'postgres',
+  async get(key) { await pgInit(); const r = await pgPool().query('SELECT v FROM nova_kv WHERE k=$1', [key]); return r.rows[0] ? r.rows[0].v : null; },
+  async put(key, value) { await pgInit(); await pgPool().query('INSERT INTO nova_kv (k,v,updated_at) VALUES ($1,$2,now()) ON CONFLICT (k) DO UPDATE SET v=$2, updated_at=now()', [key, value]); },
+  async del(key) { await pgInit(); await pgPool().query('DELETE FROM nova_kv WHERE k=$1', [key]); },
+};
+
+const store = useDb ? pgStore : useCloud ? {
   kind: 'supabase',
   async get(key) {
     const res = await fetch(`${SUPA.url}/storage/v1/object/${SUPA.bucket}/${key}.json`, {

@@ -20,6 +20,7 @@ const nodes = new Map();   // id -> {id, type, x, y, data, out, el}
 let edges = [];            // {id, from:{node,port}, to:{node,port}, type}
 let idCounter = 1;
 let panX = 0, panY = 0, zoom = 1;
+let clipboardNode = null;  // for Ctrl+C / Ctrl+V node copy-paste
 let MODELS = [];
 
 const viewport = document.getElementById('viewport');
@@ -961,7 +962,7 @@ function renderProps(node) {
   if (!node) {
     propsTitle.textContent = 'Properties';
     const d = el('div', { class: 'props-empty' });
-    d.innerHTML = 'Select a node to edit its settings.<br><br><b>Shortcuts</b><br>Double-click — add node<br>Drag pins — connect<br>Arrow keys — nudge (Shift = faster)<br>Ctrl+Z / Ctrl+Shift+Z — undo / redo<br>Ctrl+D — duplicate<br>Del — delete<br>F — fit view';
+    d.innerHTML = 'Select a node to edit its settings.<br><br><b>Shortcuts</b><br>Double-click — add node<br>Drag pins — connect<br>Arrow keys — nudge (Shift = faster)<br>Ctrl+Z / Ctrl+Shift+Z — undo / redo<br>Ctrl+D — duplicate<br>Ctrl+C / Ctrl+V — copy / paste<br>Del — delete<br>F — fit view';
     propsBody.appendChild(d);
     return;
   }
@@ -1013,6 +1014,15 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key.toLowerCase() === 'd' && (e.ctrlKey || e.metaKey) && selected?.kind === 'node') {
     e.preventDefault();
     duplicateNode(selected.id);
+  } else if (e.key.toLowerCase() === 'c' && (e.ctrlKey || e.metaKey) && selected?.kind === 'node') {
+    const n = nodes.get(selected.id);
+    if (n) { clipboardNode = { type: n.type, data: JSON.parse(JSON.stringify(n.data)) }; toast('Node copied'); }
+  } else if (e.key.toLowerCase() === 'v' && (e.ctrlKey || e.metaKey) && clipboardNode) {
+    e.preventDefault();
+    const vr = viewport.getBoundingClientRect();
+    const wx = (vr.width / 2 - panX) / zoom - 130, wy = (vr.height / 2 - panY) / zoom - 90;
+    const node = addNode(clipboardNode.type, wx, wy, JSON.parse(JSON.stringify(clipboardNode.data)));
+    selectNode(node.id); redrawEdges();
   } else if (selected?.kind === 'node' && e.key.startsWith('Arrow')) {
     // nudge the selected node with the arrow keys (Shift = larger step)
     e.preventDefault();
@@ -2497,6 +2507,20 @@ async function openAdminModal() {
   };
   render();
 }
+function openHelpModal() {
+  const body = openModal('Welcome to Nova');
+  body.appendChild(el('div', { class: 'modal-hint' }, 'Nova is a canvas for AI-assisted art. Wire nodes into a pipeline, or just chat with the agent and it generates onto your canvas.'));
+  const mk = (t, d) => { const r = el('div', { class: 'help-row' }); r.appendChild(el('b', {}, t)); r.appendChild(el('span', {}, d)); return r; };
+  const box = el('div', { class: 'help-list' });
+  box.appendChild(mk('Add a node', 'Double-click the canvas, or use the dock at the bottom.'));
+  box.appendChild(mk('Connect', 'Drag from a node’s pin to another; drop on empty canvas to pick a node to wire in.'));
+  box.appendChild(mk('Generate', 'Pick a model on Image/Video/3D nodes, add a Prompt, and Run — or use 💬 Agent Chat.'));
+  box.appendChild(mk('3D Director', 'Open the 3D stage to block a shot and capture it into your project.'));
+  box.appendChild(mk('Share', '🔗 Share a project to co-edit live with teammates.'));
+  box.appendChild(mk('Shortcuts', 'Ctrl+Z undo · Ctrl+D duplicate · Ctrl+C/V copy-paste · Del delete · F fit · arrows nudge.'));
+  body.appendChild(box);
+}
+document.getElementById('btn-help').addEventListener('click', openHelpModal);
 document.getElementById('btn-account').addEventListener('click', (e) => { e.stopPropagation(); openAccountMenu(); });
 document.addEventListener('pointerdown', (e) => {
   const m = document.getElementById('account-menu');
